@@ -12,6 +12,7 @@ void openLogin(BuildContext context, {int tab = 0}) {
 }
 
 /// Centers content and limits its width.
+/// Side padding is 24 px, or 16 px on phones (under 600 px wide).
 class LandingContainer extends StatelessWidget {
   final Widget child;
   final double maxWidth;
@@ -24,11 +25,12 @@ class LandingContainer extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final phone = MediaQuery.sizeOf(context).width < 600;
     return Center(
       child: ConstrainedBox(
         constraints: BoxConstraints(maxWidth: maxWidth),
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 24),
+          padding: EdgeInsets.symmetric(horizontal: phone ? 16 : 24),
           child: child,
         ),
       ),
@@ -37,6 +39,7 @@ class LandingContainer extends StatelessWidget {
 }
 
 /// Full-width section band with responsive vertical padding.
+/// Phones (under 600 px): 36. 600 to 639 px: 48. 640 px and up: 72.
 class LandingSection extends StatelessWidget {
   final Widget child;
   final Color? color;
@@ -51,11 +54,12 @@ class LandingSection extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final compact = MediaQuery.sizeOf(context).width < 640;
+    final width = MediaQuery.sizeOf(context).width;
+    final vertical = width < 600 ? 36.0 : (width < 640 ? 48.0 : 72.0);
     return Container(
       width: double.infinity,
       color: color ?? LandingColors.background,
-      padding: EdgeInsets.symmetric(vertical: compact ? 48 : 72),
+      padding: EdgeInsets.symmetric(vertical: vertical),
       child: LandingContainer(maxWidth: maxWidth, child: child),
     );
   }
@@ -343,10 +347,7 @@ class LandingStatTile extends StatelessWidget {
           const SizedBox(height: 4),
           Text(
             caption,
-            style: TextStyle(
-              color: LandingColors.textSecondary,
-              fontSize: 12,
-            ),
+            style: TextStyle(color: LandingColors.textSecondary, fontSize: 12),
           ),
         ],
       ),
@@ -420,25 +421,30 @@ class _LegendDot extends StatelessWidget {
 
 /// Lays [children] out in equal-width columns with equal-height rows.
 /// Avoids fixed card heights so text never overflows on narrow screens.
+///
+/// If [spacing] is not given, the gap is 12 px on phones (under 600 px wide)
+/// and 20 px otherwise. A value you pass is always used as-is.
 class LandingGrid extends StatelessWidget {
   final int columns;
-  final double spacing;
+  final double? spacing;
   final List<Widget> children;
 
   const LandingGrid({
     super.key,
     required this.columns,
     required this.children,
-    this.spacing = 20,
+    this.spacing,
   });
 
   @override
   Widget build(BuildContext context) {
+    final gap =
+        spacing ?? (MediaQuery.sizeOf(context).width < 600 ? 12.0 : 20.0);
     final rows = <Widget>[];
     for (var start = 0; start < children.length; start += columns) {
       final rowItems = <Widget>[];
       for (var j = 0; j < columns; j++) {
-        if (j > 0) rowItems.add(SizedBox(width: spacing));
+        if (j > 0) rowItems.add(SizedBox(width: gap));
         final index = start + j;
         rowItems.add(
           Expanded(
@@ -448,7 +454,7 @@ class LandingGrid extends StatelessWidget {
           ),
         );
       }
-      if (rows.isNotEmpty) rows.add(SizedBox(height: spacing));
+      if (rows.isNotEmpty) rows.add(SizedBox(height: gap));
       rows.add(
         IntrinsicHeight(
           child: Row(

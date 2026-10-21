@@ -4,6 +4,7 @@ import '../landing/landing_widgets.dart' show LandingCard, LandingLogo;
 import '../theme/app_colors.dart'; // only for status colors (error / success)
 import '../theme/app_theme.dart';
 import '../theme/landing_colors.dart';
+import 'dashboard_screen.dart';
 
 class LoginScreen extends StatefulWidget {
   final int initialTab;
@@ -146,11 +147,18 @@ class _LoginScreenState extends State<LoginScreen>
       _showSnackbar('Please fill in all fields.', isError: true);
       return;
     }
+
     setState(() => _loading = true);
     await Future.delayed(const Duration(milliseconds: 800));
+
     if (!mounted) return;
+
     setState(() => _loading = false);
-    _showSnackbar('Signed in successfully!');
+
+    Navigator.pushReplacement(
+      context,
+      MaterialPageRoute(builder: (context) => const DashboardScreen()),
+    );
   }
 
   void _submitRegister() async {
@@ -175,7 +183,16 @@ class _LoginScreenState extends State<LoginScreen>
     await Future.delayed(const Duration(milliseconds: 800));
     if (!mounted) return;
     setState(() => _loading = false);
-    _showSnackbar('Account created successfully!');
+
+    // UI-only placeholder: no account is actually created or saved yet.
+    _openDashboard();
+  }
+
+  void _openDashboard() {
+    Navigator.of(context).pushAndRemoveUntil(
+      MaterialPageRoute(builder: (_) => const DashboardScreen()),
+      (route) => false,
+    );
   }
 
   // ── build ─────────────────────────────────────────────────────────────────
@@ -591,9 +608,7 @@ class _LoginScreenState extends State<LoginScreen>
   Widget _buildDivider() {
     return Row(
       children: [
-        Expanded(
-          child: Divider(color: LandingColors.border, thickness: 1),
-        ),
+        Expanded(child: Divider(color: LandingColors.border, thickness: 1)),
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 14),
           child: Text(
@@ -601,9 +616,7 @@ class _LoginScreenState extends State<LoginScreen>
             style: TextStyle(color: LandingColors.textSecondary, fontSize: 12),
           ),
         ),
-        Expanded(
-          child: Divider(color: LandingColors.border, thickness: 1),
-        ),
+        Expanded(child: Divider(color: LandingColors.border, thickness: 1)),
       ],
     );
   }
@@ -648,10 +661,7 @@ class _LoginScreenState extends State<LoginScreen>
       children: [
         Text(
           message,
-          style: TextStyle(
-            color: LandingColors.textSecondary,
-            fontSize: 13,
-          ),
+          style: TextStyle(color: LandingColors.textSecondary, fontSize: 13),
         ),
         GestureDetector(
           onTap: onTap,
