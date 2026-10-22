@@ -11,10 +11,12 @@ import '../landing/landing_widgets.dart'
 import '../models/household.dart';
 import '../theme/app_theme.dart';
 import '../theme/landing_colors.dart';
+import '../widgets/app_button.dart';
 import '../widgets/household_card.dart';
 import 'add_household_screen.dart';
 import 'home_screen.dart';
 import 'household_dashboard_screen.dart';
+import 'report_form_screen.dart';
 
 /// SCR-03: Main Dashboard.
 /// Lists the households registered to the signed-in user.
@@ -60,6 +62,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
+  /// Opens the report form.
+  void _openReportForm() {
+    Navigator.of(context)
+        .push(MaterialPageRoute(builder: (_) => const ReportFormScreen()));
+  }
+
   void _openProfile() {
     showTemporaryMessage(
       context,
@@ -96,7 +104,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        _DashboardHeader(onAddHousehold: _addHousehold),
+                        _DashboardHeader(
+                          onAddHousehold: _addHousehold,
+                          onSubmitReport: _openReportForm,
+                        ),
                         const SizedBox(height: 24),
                         _HouseholdSection(
                           households: _households,
@@ -272,12 +283,16 @@ class _DashboardTopBar extends StatelessWidget {
   }
 }
 
-/// Page title, short description and the Add Household button.
-/// Side by side on wide screens; stacked on narrow screens.
+/// Page title, short description and the Add Household / Submit a Report
+/// buttons. Side by side on wide screens; stacked on narrow screens.
 class _DashboardHeader extends StatelessWidget {
   final VoidCallback onAddHousehold;
+  final VoidCallback onSubmitReport;
 
-  const _DashboardHeader({required this.onAddHousehold});
+  const _DashboardHeader({
+    required this.onAddHousehold,
+    required this.onSubmitReport,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -313,6 +328,15 @@ class _DashboardHeader extends StatelessWidget {
       onPressed: onAddHousehold,
     );
 
+    // AppButton always stretches to full width (it uses
+    // SizedBox(width: double.infinity)), so it must be given a bounded width
+    // wherever it sits inside a Row.
+    final reportButton = AppButton(
+      label: 'Submit a Report',
+      icon: Icons.flag_outlined,
+      onPressed: onSubmitReport,
+    );
+
     if (compact) {
       return Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -320,6 +344,8 @@ class _DashboardHeader extends StatelessWidget {
           titleBlock,
           const SizedBox(height: 16),
           SizedBox(width: double.infinity, child: addButton),
+          const SizedBox(height: 10),
+          SizedBox(width: double.infinity, child: reportButton),
         ],
       );
     }
@@ -328,8 +354,10 @@ class _DashboardHeader extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.center,
       children: [
         Expanded(child: titleBlock),
-        const SizedBox(width: 16),
+        const SizedBox(width: 12),
         addButton,
+        const SizedBox(width: 10),
+        SizedBox(width: 180, child: reportButton),
       ],
     );
   }
@@ -356,8 +384,11 @@ class _HouseholdSection extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const _SampleDataNotice(),
-        const SizedBox(height: 20),
+        // Only mention sample data when some is actually on screen.
+        if (households.any((h) => h.isSample)) ...[
+          const _SampleDataNotice(),
+          const SizedBox(height: 20),
+        ],
         _HouseholdGrid(
           households: households,
           onViewHousehold: onViewHousehold,
