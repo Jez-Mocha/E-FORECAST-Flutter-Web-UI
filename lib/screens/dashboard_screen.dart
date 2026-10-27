@@ -4,19 +4,20 @@ import '../landing/landing_widgets.dart'
     show
         LandingCard,
         LandingContainer,
-        LandingLogo,
         LandingPrimaryButton,
         SampleDataChip,
         ThemeToggleButton;
 import '../models/household.dart';
 import '../theme/app_theme.dart';
 import '../theme/landing_colors.dart';
-import '../widgets/app_button.dart';
+import '../widgets/dashboard_sidebar.dart';
+import '../widgets/welcome_greeting.dart';
 import '../widgets/household_card.dart';
 import 'add_household_screen.dart';
 import 'home_screen.dart';
 import 'household_dashboard_screen.dart';
 import 'report_form_screen.dart';
+import 'reports_screen.dart';
 
 /// SCR-03: Main Dashboard.
 /// Lists the households registered to the signed-in user.
@@ -63,9 +64,16 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   /// Opens the report form.
+  /// Opens the report form.
   void _openReportForm() {
     Navigator.of(context)
         .push(MaterialPageRoute(builder: (_) => const ReportFormScreen()));
+  }
+
+  /// Opens the Reports screen (report history is not connected yet).
+  void _openReports() {
+    Navigator.of(context)
+        .push(MaterialPageRoute(builder: (_) => const ReportsScreen()));
   }
 
   void _openProfile() {
@@ -93,31 +101,46 @@ class _DashboardScreenState extends State<DashboardScreen> {
       data: AppTheme.lightTheme,
       child: Scaffold(
         backgroundColor: LandingColors.backgroundSoft,
-        body: Column(
+        body: Row(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            _DashboardTopBar(onProfile: _openProfile, onLogout: _logout),
+            // Left: logo + animated Electricity Rates.
+            DashboardSidebar(
+              onSubmitReport: _openReportForm,
+              onViewReports: _openReports,
+            ),
+
+            // Right: top navigation, then the scrolling page content.
             Expanded(
-              child: SingleChildScrollView(
-                child: LandingContainer(
-                  child: Padding(
-                    padding: EdgeInsets.symmetric(vertical: compact ? 24 : 40),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        _DashboardHeader(
-                          onAddHousehold: _addHousehold,
-                          onSubmitReport: _openReportForm,
+              child: Column(
+                children: [
+                  _DashboardTopBar(onProfile: _openProfile, onLogout: _logout),
+                  Expanded(
+                    child: SingleChildScrollView(
+                      child: LandingContainer(
+                        child: Padding(
+                          padding: EdgeInsets.symmetric(
+                            vertical: compact ? 24 : 32,
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const WelcomeGreeting(),
+                              const SizedBox(height: 28),
+                              _DashboardHeader(onAddHousehold: _addHousehold),
+                              const SizedBox(height: 24),
+                              _HouseholdSection(
+                                households: _households,
+                                onAddHousehold: _addHousehold,
+                                onViewHousehold: _viewHousehold,
+                              ),
+                            ],
+                          ),
                         ),
-                        const SizedBox(height: 24),
-                        _HouseholdSection(
-                          households: _households,
-                          onAddHousehold: _addHousehold,
-                          onViewHousehold: _viewHousehold,
-                        ),
-                      ],
+                      ),
                     ),
                   ),
-                ),
+                ],
               ),
             ),
           ],
@@ -181,6 +204,7 @@ class _DashboardTopBar extends StatelessWidget {
     final compact = MediaQuery.sizeOf(context).width < 640;
 
     return Container(
+      height: DashboardSidebar.headerHeight,
       decoration: BoxDecoration(
         color: LandingColors.background,
         border: Border(bottom: BorderSide(color: LandingColors.border)),
@@ -194,16 +218,9 @@ class _DashboardTopBar extends StatelessWidget {
               padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 8),
               child: Row(
                 children: [
-                  // The logo scales down instead of wrapping on tiny screens.
-                  Expanded(
-                    child: Align(
-                      alignment: Alignment.centerLeft,
-                      child: FittedBox(
-                        fit: BoxFit.scaleDown,
-                        child: LandingLogo(),
-                      ),
-                    ),
-                  ),
+                  // The logo now lives in the sidebar. This pushes the
+                  // buttons to the right.
+                  const Spacer(),
                   const ThemeToggleButton(),
                   if (compact)
                     _buildMenu()
@@ -285,14 +302,12 @@ class _DashboardTopBar extends StatelessWidget {
 
 /// Page title, short description and the Add Household / Submit a Report
 /// buttons. Side by side on wide screens; stacked on narrow screens.
+/// Page title, short description and the Add Household button.
+/// Side by side on wide screens; stacked on narrow screens.
 class _DashboardHeader extends StatelessWidget {
   final VoidCallback onAddHousehold;
-  final VoidCallback onSubmitReport;
 
-  const _DashboardHeader({
-    required this.onAddHousehold,
-    required this.onSubmitReport,
-  });
+  const _DashboardHeader({required this.onAddHousehold});
 
   @override
   Widget build(BuildContext context) {
@@ -328,15 +343,6 @@ class _DashboardHeader extends StatelessWidget {
       onPressed: onAddHousehold,
     );
 
-    // AppButton always stretches to full width (it uses
-    // SizedBox(width: double.infinity)), so it must be given a bounded width
-    // wherever it sits inside a Row.
-    final reportButton = AppButton(
-      label: 'Submit a Report',
-      icon: Icons.flag_outlined,
-      onPressed: onSubmitReport,
-    );
-
     if (compact) {
       return Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -344,8 +350,6 @@ class _DashboardHeader extends StatelessWidget {
           titleBlock,
           const SizedBox(height: 16),
           SizedBox(width: double.infinity, child: addButton),
-          const SizedBox(height: 10),
-          SizedBox(width: double.infinity, child: reportButton),
         ],
       );
     }
@@ -356,8 +360,6 @@ class _DashboardHeader extends StatelessWidget {
         Expanded(child: titleBlock),
         const SizedBox(width: 12),
         addButton,
-        const SizedBox(width: 10),
-        SizedBox(width: 180, child: reportButton),
       ],
     );
   }
