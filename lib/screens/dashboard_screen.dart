@@ -1,11 +1,12 @@
+
 import 'package:flutter/material.dart';
 
+import '../services/api_service.dart';
 import '../landing/landing_widgets.dart'
     show
         LandingCard,
         LandingContainer,
         LandingPrimaryButton,
-        SampleDataChip,
         ThemeToggleButton;
 import '../models/household.dart';
 import '../theme/app_theme.dart';
@@ -20,10 +21,7 @@ import 'report_form_screen.dart';
 import 'reports_screen.dart';
 
 /// SCR-03: Main Dashboard.
-/// Lists the households registered to the signed-in user.
-/// Households are kept in memory for this session (no backend yet).
-/// SCR-11 does not exist yet, so Profile / Settings shows a temporary
-/// SnackBar.
+/// Loads the households registered to the signed-in user.
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});
 
@@ -32,29 +30,97 @@ class DashboardScreen extends StatefulWidget {
 }
 
 class _DashboardScreenState extends State<DashboardScreen> {
-  // Starts with the labeled SAMPLE households. Households added on SCR-04
-  // are inserted at the top. To preview the empty state, temporarily start
-  // with an empty list instead: final List<Household> _households = [];
-  final List<Household> _households = List<Household>.of(_sampleHouseholds);
+  final List<Household> _households = [];
 
-  // ── Actions ───────────────────────────────────────────────────────────────
+  bool _isLoading = true;
+  String? _loadError;
 
-  /// Opens SCR-04 and waits. If the user saved, adds the household to the list.
+  @override
+  void initState() {
+    super.initState();
+    _loadHouseholds();
+  }
+
+  /// Retrieves the signed-in user's households from FastAPI.
+  Future<void> _loadHouseholds() async {
+    setState(() {
+      _isLoading = true;
+      _loadError = null;
+    });
+
+    try {
+      final response = await ApiService.getHouseholds();
+
+      final loadedHouseholds = response.map((item) {
+        final address = item['address']?.toString() ?? '';
+
+        // Separate the address into street and city.
+        final parts = address.split(',');
+
+        final street = parts.length > 1
+            ? parts.sublist(0, parts.length - 1).join(',').trim()
+            : address;
+
+        final city = parts.length > 1
+            ? parts.last.trim()
+            : '';
+
+        return Household(
+          name: item['household_name']?.toString() ?? 'Household',
+          street: street,
+          city: city,
+          occupants: (item['occupants'] as num?)?.toInt() ?? 1,
+          provider:
+              item['electricity_provider']?.toString() ?? 'Not set',
+          ratePerKwh:
+              (item['rate_per_kwh'] as num?)?.toDouble() ?? 0.0,
+          billingCycleDay:
+              (item['billing_cycle_day'] as num?)?.toInt() ?? 1,
+        );
+      }).toList();
+
+      if (!mounted) return;
+
+      setState(() {
+        _households
+          ..clear()
+          ..addAll(loadedHouseholds);
+
+        _isLoading = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+
+      setState(() {
+        _isLoading = false;
+        _loadError = e.toString().replaceFirst('Exception: ', '');
+      });
+    }
+  }
+
+  // ── Actions ──────────────────────────────────────────────────────────────
+
+  /// Opens SCR-04 and reloads the households after saving.
   Future<void> _addHousehold() async {
     final created = await Navigator.of(context).push<Household>(
-      MaterialPageRoute(builder: (_) => const AddHouseholdScreen()),
+      MaterialPageRoute(
+        builder: (_) => const AddHouseholdScreen(),
+      ),
     );
+
     if (!mounted || created == null) return;
 
-    setState(() => _households.insert(0, created));
+    await _loadHouseholds();
+
+    if (!mounted) return;
+
     showTemporaryMessage(
       context,
-      'Added "${created.name}". It is kept for this session only; '
-      'nothing is saved to a server yet.',
+      'Household "${created.name}" registered successfully.',
     );
   }
 
-  /// Opens SCR-05 for the household that was selected.
+  /// Opens SCR-05 for the selected household.
   void _viewHousehold(Household household) {
     Navigator.of(context).push(
       MaterialPageRoute(
@@ -64,16 +130,21 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   /// Opens the report form.
-  /// Opens the report form.
   void _openReportForm() {
-    Navigator.of(context)
-        .push(MaterialPageRoute(builder: (_) => const ReportFormScreen()));
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => const ReportFormScreen(),
+      ),
+    );
   }
 
-  /// Opens the Reports screen (report history is not connected yet).
+  /// Opens the Reports screen.
   void _openReports() {
-    Navigator.of(context)
-        .push(MaterialPageRoute(builder: (_) => const ReportsScreen()));
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => const ReportsScreen(),
+      ),
+    );
   }
 
   void _openProfile() {
@@ -83,11 +154,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
-  /// Returns to the landing page and clears the screen history.
-  /// There is no real session yet, so nothing else is signed out.
+  /// Returns to the landing page.
   void _logout() {
     Navigator.of(context).pushAndRemoveUntil(
-      MaterialPageRoute(builder: (_) => const HomeScreen()),
+      MaterialPageRoute(
+        builder: (_) => const HomeScreen(),
+      ),
       (route) => false,
     );
   }
@@ -96,7 +168,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
   Widget build(BuildContext context) {
     final compact = MediaQuery.sizeOf(context).width < 640;
 
-    // Same pattern as LoginScreen: wrap in the theme-aware light theme.
     return Theme(
       data: AppTheme.lightTheme,
       child: Scaffold(
@@ -104,17 +175,20 @@ class _DashboardScreenState extends State<DashboardScreen> {
         body: Row(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            // Left: logo + animated Electricity Rates.
+            // Left sidebar.
             DashboardSidebar(
               onSubmitReport: _openReportForm,
               onViewReports: _openReports,
             ),
 
-            // Right: top navigation, then the scrolling page content.
+            // Right dashboard content.
             Expanded(
               child: Column(
                 children: [
-                  _DashboardTopBar(onProfile: _openProfile, onLogout: _logout),
+                  _DashboardTopBar(
+                    onProfile: _openProfile,
+                    onLogout: _logout,
+                  ),
                   Expanded(
                     child: SingleChildScrollView(
                       child: LandingContainer(
@@ -127,13 +201,67 @@ class _DashboardScreenState extends State<DashboardScreen> {
                             children: [
                               const WelcomeGreeting(),
                               const SizedBox(height: 28),
-                              _DashboardHeader(onAddHousehold: _addHousehold),
-                              const SizedBox(height: 24),
-                              _HouseholdSection(
-                                households: _households,
+
+                              _DashboardHeader(
                                 onAddHousehold: _addHousehold,
-                                onViewHousehold: _viewHousehold,
                               ),
+
+                              const SizedBox(height: 24),
+
+                              // Loading state.
+                              if (_isLoading)
+                                const Center(
+                                  child: Padding(
+                                    padding: EdgeInsets.all(40),
+                                    child: CircularProgressIndicator(),
+                                  ),
+                                )
+
+                              // Error state.
+                              else if (_loadError != null)
+                                LandingCard(
+                                  padding: const EdgeInsets.all(24),
+                                  child: Column(
+                                    children: [
+                                      const Icon(
+                                        Icons.error_outline,
+                                        color: Colors.red,
+                                        size: 32,
+                                      ),
+                                      const SizedBox(height: 12),
+                                      Text(
+                                        'Unable to load households',
+                                        style: TextStyle(
+                                          color: LandingColors.textPrimary,
+                                          fontWeight: FontWeight.w600,
+                                        ),
+                                      ),
+                                      const SizedBox(height: 8),
+                                      Text(
+                                        _loadError!,
+                                        textAlign: TextAlign.center,
+                                        style: TextStyle(
+                                          color: LandingColors.textSecondary,
+                                          fontSize: 13,
+                                        ),
+                                      ),
+                                      const SizedBox(height: 16),
+                                      LandingPrimaryButton(
+                                        label: 'Try Again',
+                                        large: false,
+                                        onPressed: _loadHouseholds,
+                                      ),
+                                    ],
+                                  ),
+                                )
+
+                              // Household list.
+                              else
+                                _HouseholdSection(
+                                  households: _households,
+                                  onAddHousehold: _addHousehold,
+                                  onViewHousehold: _viewHousehold,
+                                ),
                             ],
                           ),
                         ),
@@ -150,11 +278,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 }
 
-/// Shows a short message in the E-FORECAST style (a floating SnackBar).
-/// Shared by the dashboard screens.
+/// Shows a floating SnackBar in the E-FORECAST style.
 void showTemporaryMessage(BuildContext context, String message) {
   final messenger = ScaffoldMessenger.of(context);
+
   messenger.clearSnackBars();
+
   messenger.showSnackBar(
     SnackBar(
       backgroundColor: LandingColors.background,
@@ -191,13 +320,15 @@ void showTemporaryMessage(BuildContext context, String message) {
 
 enum _AccountAction { profile, logout }
 
-/// Top bar: logo on the left; theme toggle, Profile / Settings and Logout on
-/// the right. On narrow screens the last two collapse into one menu.
+/// Dashboard top navigation bar.
 class _DashboardTopBar extends StatelessWidget {
   final VoidCallback onProfile;
   final VoidCallback onLogout;
 
-  const _DashboardTopBar({required this.onProfile, required this.onLogout});
+  const _DashboardTopBar({
+    required this.onProfile,
+    required this.onLogout,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -207,7 +338,9 @@ class _DashboardTopBar extends StatelessWidget {
       height: DashboardSidebar.headerHeight,
       decoration: BoxDecoration(
         color: LandingColors.background,
-        border: Border(bottom: BorderSide(color: LandingColors.border)),
+        border: Border(
+          bottom: BorderSide(color: LandingColors.border),
+        ),
       ),
       child: SafeArea(
         bottom: false,
@@ -215,27 +348,35 @@ class _DashboardTopBar extends StatelessWidget {
           child: ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 1200),
             child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 8),
+              padding: const EdgeInsets.symmetric(
+                horizontal: 24,
+                vertical: 8,
+              ),
               child: Row(
                 children: [
-                  // The logo now lives in the sidebar. This pushes the
-                  // buttons to the right.
                   const Spacer(),
                   const ThemeToggleButton(),
+
                   if (compact)
                     _buildMenu()
                   else ...[
                     const SizedBox(width: 4),
                     TextButton.icon(
                       onPressed: onProfile,
-                      icon: const Icon(Icons.person_outline_rounded, size: 18),
+                      icon: const Icon(
+                        Icons.person_outline_rounded,
+                        size: 18,
+                      ),
                       label: const Text('Profile / Settings'),
                       style: _linkStyle(),
                     ),
                     const SizedBox(width: 4),
                     TextButton.icon(
                       onPressed: onLogout,
-                      icon: const Icon(Icons.logout_rounded, size: 18),
+                      icon: const Icon(
+                        Icons.logout_rounded,
+                        size: 18,
+                      ),
                       label: const Text('Logout'),
                       style: _linkStyle(),
                     ),
@@ -252,8 +393,14 @@ class _DashboardTopBar extends StatelessWidget {
   ButtonStyle _linkStyle() {
     return TextButton.styleFrom(
       foregroundColor: LandingColors.textSecondary,
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
-      textStyle: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500),
+      padding: const EdgeInsets.symmetric(
+        horizontal: 12,
+        vertical: 12,
+      ),
+      textStyle: const TextStyle(
+        fontSize: 14,
+        fontWeight: FontWeight.w500,
+      ),
     );
   }
 
@@ -269,18 +416,27 @@ class _DashboardTopBar extends StatelessWidget {
         switch (action) {
           case _AccountAction.profile:
             onProfile();
+            break;
+
           case _AccountAction.logout:
             onLogout();
+            break;
         }
       },
       itemBuilder: (context) => [
         PopupMenuItem(
           value: _AccountAction.profile,
-          child: _menuRow(Icons.person_outline_rounded, 'Profile / Settings'),
+          child: _menuRow(
+            Icons.person_outline_rounded,
+            'Profile / Settings',
+          ),
         ),
         PopupMenuItem(
           value: _AccountAction.logout,
-          child: _menuRow(Icons.logout_rounded, 'Logout'),
+          child: _menuRow(
+            Icons.logout_rounded,
+            'Logout',
+          ),
         ),
       ],
     );
@@ -289,25 +445,31 @@ class _DashboardTopBar extends StatelessWidget {
   Widget _menuRow(IconData icon, String label) {
     return Row(
       children: [
-        Icon(icon, size: 18, color: LandingColors.textSecondary),
+        Icon(
+          icon,
+          size: 18,
+          color: LandingColors.textSecondary,
+        ),
         const SizedBox(width: 10),
         Text(
           label,
-          style: TextStyle(color: LandingColors.textPrimary, fontSize: 14),
+          style: TextStyle(
+            color: LandingColors.textPrimary,
+            fontSize: 14,
+          ),
         ),
       ],
     );
   }
 }
 
-/// Page title, short description and the Add Household / Submit a Report
-/// buttons. Side by side on wide screens; stacked on narrow screens.
-/// Page title, short description and the Add Household button.
-/// Side by side on wide screens; stacked on narrow screens.
+/// Dashboard page title and Add Household button.
 class _DashboardHeader extends StatelessWidget {
   final VoidCallback onAddHousehold;
 
-  const _DashboardHeader({required this.onAddHousehold});
+  const _DashboardHeader({
+    required this.onAddHousehold,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -349,7 +511,10 @@ class _DashboardHeader extends StatelessWidget {
         children: [
           titleBlock,
           const SizedBox(height: 16),
-          SizedBox(width: double.infinity, child: addButton),
+          SizedBox(
+            width: double.infinity,
+            child: addButton,
+          ),
         ],
       );
     }
@@ -365,7 +530,7 @@ class _DashboardHeader extends StatelessWidget {
   }
 }
 
-/// Decides what to show: the empty state, or the notice + household grid.
+/// Displays the empty state or household cards.
 class _HouseholdSection extends StatelessWidget {
   final List<Household> households;
   final VoidCallback onAddHousehold;
@@ -380,39 +545,35 @@ class _HouseholdSection extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (households.isEmpty) {
-      return _EmptyHouseholds(onAddHousehold: onAddHousehold);
+      return _EmptyHouseholds(
+        onAddHousehold: onAddHousehold,
+      );
     }
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        // Only mention sample data when some is actually on screen.
-        if (households.any((h) => h.isSample)) ...[
-          const _SampleDataNotice(),
-          const SizedBox(height: 20),
-        ],
-        _HouseholdGrid(
-          households: households,
-          onViewHousehold: onViewHousehold,
-        ),
-      ],
+    return _HouseholdGrid(
+      households: households,
+      onViewHousehold: onViewHousehold,
     );
   }
 }
 
-/// Friendly message shown when the user has no households.
-/// Its button uses the same Add Household action as the header button.
+/// Empty state shown when no households are registered.
 class _EmptyHouseholds extends StatelessWidget {
   final VoidCallback onAddHousehold;
 
-  const _EmptyHouseholds({required this.onAddHousehold});
+  const _EmptyHouseholds({
+    required this.onAddHousehold,
+  });
 
   @override
   Widget build(BuildContext context) {
     return SizedBox(
       width: double.infinity,
       child: LandingCard(
-        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 48),
+        padding: const EdgeInsets.symmetric(
+          horizontal: 24,
+          vertical: 48,
+        ),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -421,7 +582,9 @@ class _EmptyHouseholds extends StatelessWidget {
               height: 64,
               decoration: BoxDecoration(
                 color: LandingColors.periwinkleTint,
-                borderRadius: BorderRadius.circular(LandingRadius.card),
+                borderRadius: BorderRadius.circular(
+                  LandingRadius.card,
+                ),
               ),
               child: Icon(
                 Icons.home_work_outlined,
@@ -466,75 +629,7 @@ class _EmptyHouseholds extends StatelessWidget {
   }
 }
 
-/// A notice that explains which households are demo data and that added
-/// households are not stored permanently yet.
-class _SampleDataNotice extends StatelessWidget {
-  const _SampleDataNotice();
-
-  @override
-  Widget build(BuildContext context) {
-    return LandingCard(
-      color: LandingColors.periwinkleTint,
-      padding: const EdgeInsets.all(16),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const SampleDataChip(label: 'Sample data'),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Text(
-              'Households named "Sample Household" are demo examples for '
-              'previewing the layout. Households you add are kept for this '
-              'session only and are not saved to a server yet.',
-              style: TextStyle(
-                color: LandingColors.textSecondary,
-                fontSize: 13,
-                height: 1.5,
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-/// SAMPLE DATA ONLY. These are made-up placeholders, not real households.
-/// The rate and billing day are placeholders too.
-const List<Household> _sampleHouseholds = [
-  Household(
-    name: 'Sample Household 1',
-    street: 'Sample Street, Sample Barangay',
-    city: 'Sample City',
-    occupants: 4,
-    provider: 'Sample Electric Provider',
-    ratePerKwh: 10.0,
-    billingCycleDay: 1,
-    isSample: true,
-  ),
-  Household(
-    name: 'Sample Household 2',
-    street: 'Example Avenue, Example Barangay',
-    city: 'Example City',
-    occupants: 2,
-    provider: 'Sample Electric Provider',
-    ratePerKwh: 10.0,
-    billingCycleDay: 1,
-    isSample: true,
-  ),
-  Household(
-    name: 'Sample Household 3 (Boarding House)',
-    street: 'Demo Road, Demo Barangay',
-    city: 'Demo City',
-    occupants: 1,
-    provider: 'Demo Electric Cooperative',
-    ratePerKwh: 10.0,
-    billingCycleDay: 1,
-    isSample: true,
-  ),
-];
-
-/// Lays the household cards out in 1, 2 or 3 columns depending on width.
+/// Lays household cards out in 1, 2 or 3 columns.
 class _HouseholdGrid extends StatelessWidget {
   final List<Household> households;
   final void Function(Household household) onViewHousehold;
@@ -549,29 +644,30 @@ class _HouseholdGrid extends StatelessWidget {
     return LayoutBuilder(
       builder: (context, constraints) {
         const spacing = 16.0;
+
         final width = constraints.maxWidth;
 
-        // 3 columns on wide screens, 2 on tablets, 1 on phones.
-        final columns = width >= 900 ? 3 : (width >= 600 ? 2 : 1);
+        final columns = width >= 900
+            ? 3
+            : (width >= 600 ? 2 : 1);
 
-        // Share the available width evenly. floorToDouble avoids tiny
-        // rounding errors that could push a card onto the next row.
-        final cardWidth = ((width - spacing * (columns - 1)) / columns)
-            .floorToDouble();
+        final cardWidth =
+            ((width - spacing * (columns - 1)) / columns)
+                .floorToDouble();
 
         return Wrap(
           spacing: spacing,
           runSpacing: spacing,
           children: [
-            for (final h in households)
+            for (final household in households)
               SizedBox(
                 width: cardWidth,
                 child: HouseholdCard(
-                  name: h.name,
-                  address: h.address,
-                  occupants: h.occupants,
-                  provider: h.provider,
-                  onView: () => onViewHousehold(h),
+                  name: household.name,
+                  address: household.address,
+                  occupants: household.occupants,
+                  provider: household.provider,
+                  onView: () => onViewHousehold(household),
                 ),
               ),
           ],
