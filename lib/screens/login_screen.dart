@@ -5,6 +5,7 @@ import '../theme/app_colors.dart'; // only for status colors (error / success)
 import '../theme/app_theme.dart';
 import '../theme/landing_colors.dart';
 import 'dashboard_screen.dart';
+import '../services/api_service.dart';
 
 class LoginScreen extends StatefulWidget {
   final int initialTab;
@@ -23,7 +24,7 @@ class _LoginScreenState extends State<LoginScreen>
   final _signInPassCtrl = TextEditingController();
 
   // Register controllers
-  final _regNameCtrl = TextEditingController();
+  final _regUsernameCtrl = TextEditingController();
   final _regEmailCtrl = TextEditingController();
   final _regPassCtrl = TextEditingController();
   final _regConfirmPassCtrl = TextEditingController();
@@ -52,7 +53,7 @@ class _LoginScreenState extends State<LoginScreen>
     _tab.dispose();
     _signInEmailCtrl.dispose();
     _signInPassCtrl.dispose();
-    _regNameCtrl.dispose();
+    _regUsernameCtrl.dispose();
     _regEmailCtrl.dispose();
     _regPassCtrl.dispose();
     _regConfirmPassCtrl.dispose();
@@ -142,51 +143,100 @@ class _LoginScreenState extends State<LoginScreen>
     );
   }
 
-  void _submitSignIn() async {
-    if (_signInEmailCtrl.text.trim().isEmpty || _signInPassCtrl.text.isEmpty) {
-      _showSnackbar('Please fill in all fields.', isError: true);
-      return;
-    }
+  Future<void> _submitSignIn() async {
+  if (_signInEmailCtrl.text.trim().isEmpty ||
+      _signInPassCtrl.text.isEmpty) {
+    _showSnackbar('Please fill in all fields.', isError: true);
+    return;
+  }
 
-    setState(() => _loading = true);
-    await Future.delayed(const Duration(milliseconds: 800));
+  setState(() => _loading = true);
+
+  try {
+    await ApiService.login(
+      usernameOrEmail: _signInEmailCtrl.text.trim(),
+      password: _signInPassCtrl.text,
+    );
 
     if (!mounted) return;
-
-    setState(() => _loading = false);
 
     Navigator.pushReplacement(
       context,
       MaterialPageRoute(builder: (context) => const DashboardScreen()),
     );
-  }
-
-  void _submitRegister() async {
-    final pass = _regPassCtrl.text;
-    final confirm = _regConfirmPassCtrl.text;
-
-    if (_regNameCtrl.text.trim().isEmpty ||
-        _regEmailCtrl.text.trim().isEmpty ||
-        pass.isEmpty ||
-        confirm.isEmpty) {
-      _showSnackbar('Please fill in all fields.', isError: true);
-      return;
-    }
-    if (pass != confirm) {
-      setState(() => _confirmMismatch = true);
-      return;
-    }
-    setState(() {
-      _confirmMismatch = false;
-      _loading = true;
-    });
-    await Future.delayed(const Duration(milliseconds: 800));
+  } catch (e) {
     if (!mounted) return;
-    setState(() => _loading = false);
-
-    // UI-only placeholder: no account is actually created or saved yet.
-    _openDashboard();
+    _showSnackbar(e.toString().replaceFirst('Exception: ', ''),
+        isError: true);
+  } finally {
+    if (mounted) {
+      setState(() => _loading = false);
+    }
   }
+}
+
+  Future<void> _submitRegister() async {
+  final username = _regUsernameCtrl.text.trim();
+  final email = _regEmailCtrl.text.trim();
+  final pass = _regPassCtrl.text;
+  final confirm = _regConfirmPassCtrl.text;
+
+  if (username.isEmpty ||
+      email.isEmpty ||
+      pass.isEmpty ||
+      confirm.isEmpty) {
+    _showSnackbar('Please fill in all fields.', isError: true);
+    return;
+  }
+
+  if (username.length < 3 || username.length > 50) {
+    _showSnackbar('Username must be 3–50 characters.', isError: true);
+    return;
+  }
+
+  if (!email.toLowerCase().endsWith('@gmail.com')) {
+    _showSnackbar('Please use a Gmail address.', isError: true);
+    return;
+  }
+
+  if (pass.length < 8) {
+    _showSnackbar('Password must be at least 8 characters.', isError: true);
+    return;
+  }
+
+  if (pass != confirm) {
+    setState(() => _confirmMismatch = true);
+    return;
+  }
+
+  setState(() {
+    _confirmMismatch = false;
+    _loading = true;
+  });
+
+  try {
+    await ApiService.register(
+      username: username,
+      email: email,
+      password: pass,
+    );
+
+    if (!mounted) return;
+
+    _showSnackbar('Registration successful!');
+    _openDashboard();
+  } catch (e) {
+    if (!mounted) return;
+    _showSnackbar(
+      e.toString().replaceFirst('Exception: ', ''),
+      isError: true,
+    );
+  } finally {
+    if (mounted) {
+      setState(() => _loading = false);
+    }
+  }
+}
 
   void _openDashboard() {
     Navigator.of(context).pushAndRemoveUntil(
@@ -414,9 +464,9 @@ class _LoginScreenState extends State<LoginScreen>
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         _buildField(
-          controller: _regNameCtrl,
-          label: 'Full Name',
-          hint: 'Juan dela Cruz',
+          controller: _regUsernameCtrl,
+          label: 'Username',
+          hint: 'Enter your usesrname',
           icon: Icons.person_outline_rounded,
         ),
         const SizedBox(height: 14),
