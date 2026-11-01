@@ -5,17 +5,22 @@ import '../landing/landing_widgets.dart'
     show
         LandingCard,
         LandingContainer,
-        LandingLogo,
         LandingPrimaryButton,
-        LandingSecondaryButton,
-        ThemeToggleButton;
+        LandingSecondaryButton;
 import '../models/household.dart';
+import '../services/api_service.dart';
 import '../theme/app_theme.dart';
+import '../theme/app_tokens.dart';
 import '../theme/landing_colors.dart';
+import '../widgets/app_back_link.dart';
+import '../widgets/app_message.dart';
+import '../widgets/app_top_bar.dart';
 
 /// SCR-04: Add Household.
-/// Collects the details of one household and returns a [Household] to the
-/// screen that opened it (via Navigator.pop). Nothing is sent to a server.
+/// Collects the details of one household and saves it on the server.
+/// Only after the server confirms (and returns a household ID) does it
+/// return a [Household] to the screen that opened it (via Navigator.pop).
+/// If saving fails, the user stays on the form and nothing is returned.
 class AddHouseholdScreen extends StatefulWidget {
   const AddHouseholdScreen({super.key});
 
@@ -27,6 +32,7 @@ class _AddHouseholdScreenState extends State<AddHouseholdScreen> {
   final _formKey = GlobalKey<FormState>();
 
   final _nameCtrl = TextEditingController();
+  final _meterCtrl = TextEditingController();
   final _streetCtrl = TextEditingController();
   final _cityCtrl = TextEditingController();
   final _occupantsCtrl = TextEditingController();
@@ -34,9 +40,13 @@ class _AddHouseholdScreenState extends State<AddHouseholdScreen> {
   final _rateCtrl = TextEditingController();
   final _billingDayCtrl = TextEditingController();
 
+  // True while the household is being saved on the server.
+  bool _isSaving = false;
+
   @override
   void dispose() {
     _nameCtrl.dispose();
+    _meterCtrl.dispose();
     _streetCtrl.dispose();
     _cityCtrl.dispose();
     _occupantsCtrl.dispose();
@@ -48,21 +58,60 @@ class _AddHouseholdScreenState extends State<AddHouseholdScreen> {
 
   // ── Actions ───────────────────────────────────────────────────────────────
 
-  /// Checks every field. If all are valid, returns the new household.
-  void _save() {
+  /// Checks every field, saves the household on the server, and only then
+  /// returns the new household (with its server ID) to the dashboard.
+  Future<void> _save() async {
+    // Stops double taps and a second Enter key press while saving.
+    if (_isSaving) return;
     if (!(_formKey.currentState?.validate() ?? false)) return;
 
-    Navigator.of(context).pop(
-      Household(
-        name: _nameCtrl.text.trim(),
-        street: _streetCtrl.text.trim(),
-        city: _cityCtrl.text.trim(),
-        occupants: int.parse(_occupantsCtrl.text.trim()),
-        provider: _providerCtrl.text.trim(),
-        ratePerKwh: double.parse(_rateCtrl.text.trim()),
-        billingCycleDay: int.parse(_billingDayCtrl.text.trim()),
-      ),
-    );
+    final name = _nameCtrl.text.trim();
+    final meter = _meterCtrl.text.trim();
+    final street = _streetCtrl.text.trim();
+    final city = _cityCtrl.text.trim();
+
+    setState(() => _isSaving = true);
+
+    try {
+      final result = await ApiService.createHousehold(
+        householdName: name,
+        address: '$street, $city',
+        meterNumber: meter,
+      );
+
+      // The server must confirm with a household ID.
+      final id = int.tryParse('${result['household_id'] ?? ''}');
+      if (id == null) {
+        throw const ApiException(
+          'The server did not confirm the household. Please try again.',
+        );
+      }
+
+      if (!mounted) return;
+
+      Navigator.of(context).pop(
+        Household(
+          id: id,
+          name: name,
+          street: street,
+          city: city,
+          occupants: int.parse(_occupantsCtrl.text.trim()),
+          provider: _providerCtrl.text.trim(),
+          ratePerKwh: double.parse(_rateCtrl.text.trim()),
+          billingCycleDay: int.parse(_billingDayCtrl.text.trim()),
+          meterNumber: meter,
+        ),
+      );
+    } on ApiException catch (e) {
+      // Friendly message. The user stays on the form to fix it.
+      if (!mounted) return;
+      setState(() => _isSaving = false);
+      showTemporaryMessage(context, e.message);
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _isSaving = false);
+      showTemporaryMessage(context, 'Something went wrong. Please try again.');
+    }
   }
 
   /// Leaves without saving (the dashboard receives nothing).
@@ -81,7 +130,7 @@ class _AddHouseholdScreenState extends State<AddHouseholdScreen> {
         backgroundColor: LandingColors.backgroundSoft,
         body: Column(
           children: [
-            _AddHouseholdTopBar(compact: compact),
+            const AppTopBar(),
             Expanded(
               child: SingleChildScrollView(
                 keyboardDismissBehavior:
@@ -93,7 +142,7 @@ class _AddHouseholdScreenState extends State<AddHouseholdScreen> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        _buildBackLink(),
+                        AppBackLink(label: 'My Households', onPressed: _cancel),
                         const SizedBox(height: 12),
                         _buildHeader(),
                         const SizedBox(height: 24),
@@ -106,8 +155,9 @@ class _AddHouseholdScreenState extends State<AddHouseholdScreen> {
                         ),
                         const SizedBox(height: 16),
                         Text(
-                          'Households are kept for this session only. '
-                          'Permanent storage will be added later.',
+                          'The household name, address and meter number are '
+                          'saved to your account. The other details are kept '
+                          'for this session only.',
                           style: TextStyle(
                             color: LandingColors.textSecondary,
                             fontSize: 12,
@@ -126,22 +176,6 @@ class _AddHouseholdScreenState extends State<AddHouseholdScreen> {
     );
   }
 
-  Widget _buildBackLink() {
-    return Align(
-      alignment: Alignment.centerLeft,
-      child: TextButton.icon(
-        onPressed: _cancel,
-        icon: const Icon(Icons.arrow_back_rounded, size: 16),
-        label: const Text('My Households'),
-        style: TextButton.styleFrom(
-          foregroundColor: LandingColors.textSecondary,
-          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
-          textStyle: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500),
-        ),
-      ),
-    );
-  }
-
   Widget _buildHeader() {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -150,7 +184,7 @@ class _AddHouseholdScreenState extends State<AddHouseholdScreen> {
           'Add Household',
           style: TextStyle(
             color: LandingColors.textPrimary,
-            fontSize: 28,
+            fontSize: AppText.pageTitle,
             fontWeight: FontWeight.w700,
             letterSpacing: -0.3,
           ),
@@ -191,6 +225,16 @@ class _AddHouseholdScreenState extends State<AddHouseholdScreen> {
                 validator: _validateName,
               ),
               const SizedBox(height: 16),
+              _field(
+                controller: _meterCtrl,
+                label: 'Meter Number',
+                hint: 'e.g. MTR-000010',
+                helper: 'The number printed on your electric meter',
+                icon: Icons.speed_outlined,
+                capitalization: TextCapitalization.characters,
+                validator: _validateMeterNumber,
+              ),
+              const SizedBox(height: 16),
               _fieldRow(
                 twoCol,
                 _field(
@@ -198,14 +242,16 @@ class _AddHouseholdScreenState extends State<AddHouseholdScreen> {
                   label: 'Street / Barangay',
                   icon: Icons.signpost_outlined,
                   capitalization: TextCapitalization.words,
-                  validator: (v) => _validateRequired(v, 'Street / Barangay'),
+                  validator: (v) =>
+                      _validateAddressPart(v, 'Street / Barangay'),
                 ),
                 _field(
                   controller: _cityCtrl,
                   label: 'City / Municipality',
                   icon: Icons.location_city_outlined,
                   capitalization: TextCapitalization.words,
-                  validator: (v) => _validateRequired(v, 'City / Municipality'),
+                  validator: (v) =>
+                      _validateAddressPart(v, 'City / Municipality'),
                 ),
               ),
               const SizedBox(height: 16),
@@ -274,18 +320,27 @@ class _AddHouseholdScreenState extends State<AddHouseholdScreen> {
                 Row(
                   mainAxisAlignment: MainAxisAlignment.end,
                   children: [
-                    LandingSecondaryButton(label: 'Cancel', onPressed: _cancel),
+                    LandingSecondaryButton(
+                      label: 'Cancel',
+                      onPressed: _isSaving ? () {} : _cancel,
+                    ),
                     const SizedBox(width: 12),
                     LandingPrimaryButton(
-                      label: 'Save Household',
-                      onPressed: _save,
+                      label: _isSaving ? 'Saving…' : 'Save Household',
+                      onPressed: _isSaving ? () {} : _save,
                     ),
                   ],
                 )
               else ...[
-                LandingPrimaryButton(label: 'Save Household', onPressed: _save),
+                LandingPrimaryButton(
+                  label: _isSaving ? 'Saving…' : 'Save Household',
+                  onPressed: _isSaving ? () {} : _save,
+                ),
                 const SizedBox(height: 12),
-                LandingSecondaryButton(label: 'Cancel', onPressed: _cancel),
+                LandingSecondaryButton(
+                  label: 'Cancel',
+                  onPressed: _isSaving ? () {} : _cancel,
+                ),
               ],
             ],
           );
@@ -328,6 +383,7 @@ class _AddHouseholdScreenState extends State<AddHouseholdScreen> {
     return TextFormField(
       controller: controller,
       validator: validator,
+      enabled: !_isSaving,
       keyboardType: keyboardType,
       inputFormatters: formatters,
       textCapitalization: capitalization,
@@ -352,10 +408,30 @@ String? _validateRequired(String? value, String label) {
   return null;
 }
 
+/// The server accepts 2 to 100 characters. We keep the existing 60 limit.
 String? _validateName(String? value) {
   final required = _validateRequired(value, 'Household name');
   if (required != null) return required;
-  if (value!.trim().length > 60) return 'Use 60 characters or fewer';
+  final length = value!.trim().length;
+  if (length < 2) return 'Use at least 2 characters';
+  if (length > 60) return 'Use 60 characters or fewer';
+  return null;
+}
+
+/// The server accepts 1 to 30 characters, and each meter number can only
+/// belong to one household.
+String? _validateMeterNumber(String? value) {
+  final required = _validateRequired(value, 'Meter number');
+  if (required != null) return required;
+  if (value!.trim().length > 30) return 'Use 30 characters or fewer';
+  return null;
+}
+
+/// Street and city are joined into one address (the server allows 255).
+String? _validateAddressPart(String? value, String label) {
+  final required = _validateRequired(value, label);
+  if (required != null) return required;
+  if (value!.trim().length > 120) return 'Use 120 characters or fewer';
   return null;
 }
 
@@ -384,49 +460,4 @@ String? _validateRate(String? value) {
   if (rate == null) return 'Enter a valid number, e.g. 12.50';
   if (rate <= 0) return 'Rate must be greater than 0';
   return null;
-}
-
-/// Top bar: logo and theme toggle (same look as the dashboard top bar).
-class _AddHouseholdTopBar extends StatelessWidget {
-  final bool compact;
-
-  const _AddHouseholdTopBar({required this.compact});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      decoration: BoxDecoration(
-        color: LandingColors.background,
-        border: Border(bottom: BorderSide(color: LandingColors.border)),
-      ),
-      child: SafeArea(
-        bottom: false,
-        child: Center(
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 1200),
-            child: Padding(
-              padding: EdgeInsets.symmetric(
-                horizontal: compact ? 16 : 24,
-                vertical: 8,
-              ),
-              child: const Row(
-                children: [
-                  Expanded(
-                    child: Align(
-                      alignment: Alignment.centerLeft,
-                      child: FittedBox(
-                        fit: BoxFit.scaleDown,
-                        child: LandingLogo(),
-                      ),
-                    ),
-                  ),
-                  ThemeToggleButton(),
-                ],
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
 }

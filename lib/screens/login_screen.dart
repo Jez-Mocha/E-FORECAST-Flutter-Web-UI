@@ -5,6 +5,7 @@ import '../theme/app_colors.dart'; // only for status colors (error / success)
 import '../theme/app_theme.dart';
 import '../theme/landing_colors.dart';
 import 'dashboard_screen.dart';
+import '../services/api_service.dart';
 
 class LoginScreen extends StatefulWidget {
   final int initialTab;
@@ -142,50 +143,90 @@ class _LoginScreenState extends State<LoginScreen>
     );
   }
 
-  void _submitSignIn() async {
-    if (_signInEmailCtrl.text.trim().isEmpty || _signInPassCtrl.text.isEmpty) {
+  Future<void> _submitSignIn() async {
+    final email = _signInEmailCtrl.text.trim();
+    final password = _signInPassCtrl.text;
+
+    if (email.isEmpty || password.isEmpty) {
       _showSnackbar('Please fill in all fields.', isError: true);
       return;
     }
 
     setState(() => _loading = true);
-    await Future.delayed(const Duration(milliseconds: 800));
 
-    if (!mounted) return;
+    try {
+      await ApiService.login(usernameOrEmail: email, password: password);
+      await ThemeController.loadForCurrentUser();
 
-    setState(() => _loading = false);
+      if (!mounted) return;
 
-    Navigator.pushReplacement(
-      context,
-      MaterialPageRoute(builder: (context) => const DashboardScreen()),
-    );
+      setState(() => _loading = false);
+
+      _showSnackbar('Login successful!');
+
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(builder: (context) => const DashboardScreen()),
+      );
+    } catch (e) {
+      if (!mounted) return;
+
+      setState(() => _loading = false);
+
+      _showSnackbar(
+        'Login failed. Check your username/email and password.',
+        isError: true,
+      );
+    }
   }
 
-  void _submitRegister() async {
-    final pass = _regPassCtrl.text;
+  Future<void> _submitRegister() async {
+    final username = _regNameCtrl.text.trim();
+    final email = _regEmailCtrl.text.trim();
+    final password = _regPassCtrl.text;
     final confirm = _regConfirmPassCtrl.text;
 
-    if (_regNameCtrl.text.trim().isEmpty ||
-        _regEmailCtrl.text.trim().isEmpty ||
-        pass.isEmpty ||
+    if (username.isEmpty ||
+        email.isEmpty ||
+        password.isEmpty ||
         confirm.isEmpty) {
       _showSnackbar('Please fill in all fields.', isError: true);
       return;
     }
-    if (pass != confirm) {
+
+    if (password != confirm) {
       setState(() => _confirmMismatch = true);
       return;
     }
+
     setState(() {
       _confirmMismatch = false;
       _loading = true;
     });
-    await Future.delayed(const Duration(milliseconds: 800));
-    if (!mounted) return;
-    setState(() => _loading = false);
 
-    // UI-only placeholder: no account is actually created or saved yet.
-    _openDashboard();
+    try {
+      await ApiService.register(
+        username: username,
+        email: email,
+        password: password,
+      );
+      await ThemeController.loadForCurrentUser();
+
+      if (!mounted) return;
+
+      setState(() => _loading = false);
+      _showSnackbar('Account created successfully!');
+
+      _openDashboard();
+    } catch (e) {
+      if (!mounted) return;
+
+      setState(() => _loading = false);
+      _showSnackbar(
+        'Registration failed. The username or email may already exist.',
+        isError: true,
+      );
+    }
   }
 
   void _openDashboard() {
