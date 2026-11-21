@@ -1,18 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
-import '../landing/landing_widgets.dart'
-    show
-        LandingCard,
-        LandingContainer,
-        LandingPrimaryButton,
-        LandingSecondaryButton;
 import '../models/household.dart';
 import '../services/api_service.dart';
-import '../theme/app_theme.dart';
+import '../theme/app_effects.dart';
 import '../theme/app_tokens.dart';
 import '../theme/landing_colors.dart';
 import '../widgets/app_back_link.dart';
+import '../widgets/app_components.dart';
 import '../widgets/app_message.dart';
 import '../widgets/app_top_bar.dart';
 
@@ -34,6 +29,7 @@ class RecordConsumptionScreen extends StatefulWidget {
 
 class _RecordConsumptionScreenState extends State<RecordConsumptionScreen> {
   final _formKey = GlobalKey<FormState>();
+  final _currentFieldKey = GlobalKey<FormFieldState<String>>();
 
   final _dateCtrl = TextEditingController();
   final _previousCtrl = TextEditingController();
@@ -53,6 +49,9 @@ class _RecordConsumptionScreenState extends State<RecordConsumptionScreen> {
 
   // True if the household was checked and has no saved readings yet.
   bool _noSavedReadings = false;
+
+  // A message from the last failed save. Shown on the form until the next try.
+  String? _submitError;
 
   @override
   void initState() {
@@ -126,6 +125,7 @@ class _RecordConsumptionScreenState extends State<RecordConsumptionScreen> {
   }
 
   /// Opens the calendar and saves the chosen date.
+  /// The calendar uses the app's current theme (light or dark).
   Future<void> _pickDate() async {
     final today = _dateOnly(DateTime.now());
 
@@ -135,9 +135,6 @@ class _RecordConsumptionScreenState extends State<RecordConsumptionScreen> {
       firstDate: DateTime(2020),
       lastDate: today,
       helpText: 'Select reading date',
-      // Keep the calendar in the E-FORECAST light theme.
-      builder: (context, child) =>
-          Theme(data: AppTheme.lightTheme, child: child!),
     );
 
     if (picked == null || !mounted) return;
@@ -146,6 +143,14 @@ class _RecordConsumptionScreenState extends State<RecordConsumptionScreen> {
       _selectedDate = _dateOnly(picked);
       _dateCtrl.text = _displayDate(_selectedDate);
     });
+  }
+
+  /// When the previous reading changes, re-check the current reading (it must
+  /// be higher), but only if the user has already typed something there.
+  void _onPreviousChanged(String _) {
+    if (_currentCtrl.text.trim().isNotEmpty) {
+      _currentFieldKey.currentState?.validate();
+    }
   }
 
   /// Checks the form, sends the reading to the backend and handles the result.
@@ -157,18 +162,21 @@ class _RecordConsumptionScreenState extends State<RecordConsumptionScreen> {
     // Households added only inside the app have no server id yet.
     final householdId = widget.household.id;
     if (householdId == null) {
-      showTemporaryMessage(
-        context,
-        'This household is not saved on the server yet, so readings '
-        'cannot be recorded for it.',
-      );
+      setState(() {
+        _submitError =
+            'This household is not saved on the server yet, so readings '
+            'cannot be recorded for it.';
+      });
       return;
     }
 
     final previous = double.parse(_previousCtrl.text.trim());
     final current = double.parse(_currentCtrl.text.trim());
 
-    setState(() => _isSaving = true);
+    setState(() {
+      _isSaving = true;
+      _submitError = null;
+    });
 
     try {
       final result = await ApiService.recordConsumption(
@@ -186,12 +194,15 @@ class _RecordConsumptionScreenState extends State<RecordConsumptionScreen> {
           ? kwhValue.toDouble()
           : double.tryParse('$kwhValue');
 
-      showTemporaryMessage(
+      // Confirm the save with the shared centered popup, then go back.
+      // The form stays disabled while the popup is open.
+      await showSuccessPopup(
         context,
-        kwh == null
-            ? 'Consumption recorded successfully.'
-            : 'Consumption recorded: ${kwh.toStringAsFixed(2)} kWh used.',
+        message: 'Consumption recorded successfully.',
+        kwh: kwh,
       );
+
+      if (!mounted) return;
 
       // Go back to the household dashboard.
       Navigator.of(context).pop(true);
@@ -199,12 +210,16 @@ class _RecordConsumptionScreenState extends State<RecordConsumptionScreen> {
       // Friendly backend message. The user stays on the form to fix it.
       // This includes an expired or missing login (401).
       if (!mounted) return;
-      setState(() => _isSaving = false);
-      showTemporaryMessage(context, e.message);
+      setState(() {
+        _isSaving = false;
+        _submitError = e.message;
+      });
     } catch (_) {
       if (!mounted) return;
-      setState(() => _isSaving = false);
-      showTemporaryMessage(context, 'Something went wrong. Please try again.');
+      setState(() {
+        _isSaving = false;
+        _submitError = 'Something went wrong. Please try again.';
+      });
     }
   }
 
@@ -215,24 +230,21 @@ class _RecordConsumptionScreenState extends State<RecordConsumptionScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final compact = MediaQuery.sizeOf(context).width < 600;
-
-    // Same pattern as the other screens: the theme-aware light theme.
-    return Theme(
-      data: AppTheme.lightTheme,
-      child: Scaffold(
-        backgroundColor: LandingColors.backgroundSoft,
-        body: Column(
+    // Inherit the app's selected theme instead of forcing light mode.
+    return Scaffold(
+      backgroundColor: Colors.transparent,
+      body: AppBackground(
+        child: Column(
           children: [
             const AppTopBar(),
             Expanded(
               child: SingleChildScrollView(
-                keyboardDismissBehavior:
-                    ScrollViewKeyboardDismissBehavior.onDrag,
-                child: LandingContainer(
-                  maxWidth: 720,
-                  child: Padding(
-                    padding: EdgeInsets.symmetric(vertical: compact ? 20 : 40),
+                padding: const EdgeInsets.fromLTRB(24, 8, 24, 32),
+                child: Center(
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(
+                      maxWidth: AppLayout.contentMaxWidth,
+                    ),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
@@ -240,25 +252,16 @@ class _RecordConsumptionScreenState extends State<RecordConsumptionScreen> {
                           label: widget.household.name,
                           onPressed: _cancel,
                         ),
-                        const SizedBox(height: 12),
+                        const SizedBox(height: 8),
                         _buildHeader(),
                         const SizedBox(height: 24),
-                        SizedBox(
-                          width: double.infinity,
-                          child: LandingCard(
-                            padding: EdgeInsets.all(compact ? 20 : 28),
-                            child: _buildForm(),
-                          ),
-                        ),
-                        const SizedBox(height: 16),
-                        Text(
-                          'The kWh used is calculated for you from the two '
-                          'meter readings.',
-                          style: TextStyle(
-                            color: LandingColors.textSecondary,
-                            fontSize: 12,
-                            height: 1.5,
-                          ),
+                        Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Expanded(child: _buildFormCard()),
+                            const SizedBox(width: 24),
+                            SizedBox(width: 320, child: _buildSidePanel()),
+                          ],
                         ),
                       ],
                     ),
@@ -281,17 +284,17 @@ class _RecordConsumptionScreenState extends State<RecordConsumptionScreen> {
           style: TextStyle(
             color: LandingColors.textPrimary,
             fontSize: AppText.pageTitle,
-            fontWeight: FontWeight.w700,
-            letterSpacing: -0.3,
+            fontWeight: FontWeight.w800,
+            letterSpacing: -0.4,
           ),
         ),
         const SizedBox(height: 6),
         Text(
-          'Enter the previous and current meter readings for '
+          'Enter the readings from your electricity meter for '
           '${widget.household.name}.',
           style: TextStyle(
             color: LandingColors.textSecondary,
-            fontSize: 14,
+            fontSize: AppText.body + 1,
             height: 1.5,
           ),
         ),
@@ -299,112 +302,233 @@ class _RecordConsumptionScreenState extends State<RecordConsumptionScreen> {
     );
   }
 
+  // ── Form card ─────────────────────────────────────────────────────────────
+
   /// Helper text under the previous reading field. It tells the user what
   /// happened with the automatic fill-in.
   String get _previousHelper {
     if (_isLoadingPrevious) return 'Loading your last saved reading…';
     if (_prefilled) {
-      return 'Filled in from your last saved reading. You can edit it.';
+      return 'Filled in from your last saved reading. You can change it.';
     }
     if (_noSavedReadings) {
-      return 'No saved readings yet. Enter your meter reading as the '
-          'starting point.';
+      return 'No saved readings yet. Enter the reading you want to start from.';
     }
     return 'The last reading you recorded';
   }
 
-  Widget _buildForm() {
-    return Form(
-      key: _formKey,
-      // Errors appear after the user has interacted with a field.
-      autovalidateMode: AutovalidateMode.onUserInteraction,
-      child: LayoutBuilder(
-        builder: (context, constraints) {
-          // Buttons sit side by side when there is room.
-          final wide = constraints.maxWidth >= 480;
+  Widget _buildFormCard() {
+    return GlassCard(
+      blur: 0,
+      padding: const EdgeInsets.fromLTRB(28, 26, 28, 28),
+      child: Form(
+        key: _formKey,
+        // Errors appear after the user has interacted with a field.
+        autovalidateMode: AutovalidateMode.onUserInteraction,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            const _StepHeader(
+              number: 1,
+              title: 'Reading date',
+              subtitle: 'Choose the day you read the meter.',
+            ),
+            const SizedBox(height: 14),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 320),
+                child: MouseRegion(
+                  cursor: _isSaving
+                      ? SystemMouseCursors.basic
+                      : SystemMouseCursors.click,
+                  child: TextFormField(
+                    controller: _dateCtrl,
+                    readOnly: true,
+                    onTap: _isSaving ? null : _pickDate,
+                    validator: (v) => (v == null || v.trim().isEmpty)
+                        ? 'Choose the date of the reading'
+                        : null,
+                    style: TextStyle(
+                      color: LandingColors.textPrimary,
+                      fontSize: AppText.body,
+                    ),
+                    decoration: InputDecoration(
+                      labelText: 'Consumption date',
+                      prefixIcon: Icon(
+                        Icons.event_outlined,
+                        size: 18,
+                        color: LandingColors.textSecondary,
+                      ),
+                      suffixIcon: Icon(
+                        Icons.calendar_month_outlined,
+                        size: 18,
+                        color: LandingColors.primary,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(height: 26),
+            Divider(color: LandingColors.border, height: 1),
+            const SizedBox(height: 22),
+            const _StepHeader(
+              number: 2,
+              title: 'Meter readings',
+              subtitle:
+                  'Type the numbers shown on your meter. The current reading '
+                  'must be higher than the previous one.',
+            ),
+            const SizedBox(height: 14),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(
+                  child: _meterField(
+                    controller: _previousCtrl,
+                    label: 'Previous meter reading',
+                    hint: 'e.g. 211.00',
+                    helper: _previousHelper,
+                    icon: Icons.speed_outlined,
+                    validator: _validatePrevious,
+                    onChanged: _onPreviousChanged,
+                  ),
+                ),
+                const SizedBox(width: 16),
+                Expanded(
+                  child: _meterField(
+                    fieldKey: _currentFieldKey,
+                    controller: _currentCtrl,
+                    label: 'Current meter reading',
+                    hint: 'e.g. 223.50',
+                    helper: 'The reading on your meter now',
+                    icon: Icons.bolt_rounded,
+                    validator: _validateCurrent,
+                    last: true,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 22),
+            _buildUsagePreview(),
+            if (_submitError != null) ...[
+              const SizedBox(height: 16),
+              _ErrorBanner(message: _submitError!),
+            ],
+            const SizedBox(height: 24),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.end,
+              children: [
+                OutlinedButton(
+                  onPressed: _isSaving ? null : _cancel,
+                  style: OutlinedButton.styleFrom(
+                    minimumSize: const Size(0, 52),
+                    padding: const EdgeInsets.symmetric(horizontal: 28),
+                  ),
+                  child: const Text('Cancel'),
+                ),
+                const SizedBox(width: 12),
+                ElevatedButton.icon(
+                  onPressed: _isSaving ? null : _submit,
+                  style: ElevatedButton.styleFrom(
+                    minimumSize: const Size(0, 52),
+                    padding: const EdgeInsets.symmetric(horizontal: 28),
+                    textStyle: const TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  icon: _isSaving
+                      ? SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: LandingColors.onPrimary,
+                          ),
+                        )
+                      : const Icon(Icons.check_rounded, size: 20),
+                  label: Text(_isSaving ? 'Saving…' : 'Record Consumption'),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 
-          return Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
+  /// Shows the kWh that the two readings add up to, as the user types.
+  /// The backend still does the real calculation when the reading is saved.
+  Widget _buildUsagePreview() {
+    return ListenableBuilder(
+      listenable: Listenable.merge([_previousCtrl, _currentCtrl]),
+      builder: (context, _) {
+        final previous = double.tryParse(_previousCtrl.text.trim());
+        final current = double.tryParse(_currentCtrl.text.trim());
+        final usage =
+            (previous != null && current != null && current > previous)
+            ? current - previous
+            : null;
+        final ready = usage != null;
+
+        return Container(
+          width: double.infinity,
+          padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
+          decoration: BoxDecoration(
+            color: ready
+                ? LandingColors.primary.withValues(alpha: 0.08)
+                : LandingColors.backgroundSoft,
+            borderRadius: BorderRadius.circular(LandingRadius.control),
+            border: Border.all(
+              color: ready
+                  ? LandingColors.primary.withValues(alpha: 0.30)
+                  : LandingColors.border,
+            ),
+          ),
+          child: Row(
             children: [
-              // Date field: tapping opens the calendar.
-              TextFormField(
-                controller: _dateCtrl,
-                readOnly: true,
-                onTap: _isSaving ? null : _pickDate,
-                validator: (v) => (v == null || v.trim().isEmpty)
-                    ? 'Consumption date is required'
-                    : null,
-                style: TextStyle(
-                  color: LandingColors.textPrimary,
-                  fontSize: 14,
-                ),
-                decoration: InputDecoration(
-                  labelText: 'Consumption Date',
-                  helperText: 'Tap to choose the date of the reading',
-                  helperMaxLines: 2,
-                  prefixIcon: Icon(
-                    Icons.event_outlined,
-                    size: 18,
-                    color: LandingColors.textSecondary,
-                  ),
-                  suffixIcon: Icon(
-                    Icons.calendar_month_outlined,
-                    size: 18,
-                    color: LandingColors.textSecondary,
+              Icon(
+                Icons.calculate_outlined,
+                size: 22,
+                color: ready
+                    ? LandingColors.primary
+                    : LandingColors.textSecondary,
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  ready
+                      ? 'Electricity used for this reading'
+                      : 'Enter both readings to see the kWh used '
+                            '(current minus previous).',
+                  style: TextStyle(
+                    color: ready
+                        ? LandingColors.textPrimary
+                        : LandingColors.textSecondary,
+                    fontSize: AppText.body,
+                    fontWeight: ready ? FontWeight.w600 : FontWeight.w400,
+                    height: 1.4,
                   ),
                 ),
               ),
-              const SizedBox(height: 16),
-              _meterField(
-                controller: _previousCtrl,
-                label: 'Previous Meter Reading',
-                hint: 'e.g. 211.00',
-                helper: _previousHelper,
-                icon: Icons.speed_outlined,
-                validator: _validatePrevious,
-              ),
-              const SizedBox(height: 16),
-              _meterField(
-                controller: _currentCtrl,
-                label: 'Current Meter Reading',
-                hint: 'e.g. 223.50',
-                helper: 'The reading on your meter now',
-                icon: Icons.bolt_rounded,
-                validator: _validateCurrent,
-                last: true,
-              ),
-              const SizedBox(height: 24),
-              if (wide)
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.end,
-                  children: [
-                    LandingSecondaryButton(
-                      label: 'Cancel',
-                      onPressed: _isSaving ? () {} : _cancel,
-                    ),
-                    const SizedBox(width: 12),
-                    LandingPrimaryButton(
-                      label: _isSaving ? 'Saving…' : 'Record Consumption',
-                      onPressed: _isSaving ? () {} : _submit,
-                    ),
-                  ],
-                )
-              else ...[
-                LandingPrimaryButton(
-                  label: _isSaving ? 'Saving…' : 'Record Consumption',
-                  onPressed: _isSaving ? () {} : _submit,
-                ),
-                const SizedBox(height: 12),
-                LandingSecondaryButton(
-                  label: 'Cancel',
-                  onPressed: _isSaving ? () {} : _cancel,
+              if (usage != null) ...[
+                const SizedBox(width: 12),
+                Text(
+                  '${usage.toStringAsFixed(2)} kWh',
+                  style: TextStyle(
+                    color: LandingColors.primary,
+                    fontSize: 20,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: -0.2,
+                  ),
                 ),
               ],
             ],
-          );
-        },
-      ),
+          ),
+        );
+      },
     );
   }
 
@@ -416,11 +540,15 @@ class _RecordConsumptionScreenState extends State<RecordConsumptionScreen> {
     required String helper,
     required IconData icon,
     required String? Function(String?) validator,
+    GlobalKey<FormFieldState<String>>? fieldKey,
+    ValueChanged<String>? onChanged,
     bool last = false,
   }) {
     return TextFormField(
+      key: fieldKey,
       controller: controller,
       validator: validator,
+      onChanged: onChanged,
       enabled: !_isSaving,
       keyboardType: const TextInputType.numberWithOptions(decimal: true),
       inputFormatters: [
@@ -428,15 +556,111 @@ class _RecordConsumptionScreenState extends State<RecordConsumptionScreen> {
       ],
       textInputAction: last ? TextInputAction.done : TextInputAction.next,
       onFieldSubmitted: last ? (_) => _submit() : null,
-      style: TextStyle(color: LandingColors.textPrimary, fontSize: 14),
+      style: TextStyle(
+        color: LandingColors.textPrimary,
+        fontSize: 16,
+        fontWeight: FontWeight.w600,
+      ),
       decoration: InputDecoration(
         labelText: label,
         hintText: hint,
         helperText: helper,
         helperMaxLines: 2,
+        errorMaxLines: 2,
         suffixText: 'kWh',
         prefixIcon: Icon(icon, size: 18, color: LandingColors.textSecondary),
       ),
+    );
+  }
+
+  // ── Side panel ────────────────────────────────────────────────────────────
+
+  Widget _buildSidePanel() {
+    final meter = widget.household.meterNumber?.trim();
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        GlassCard(
+          blur: 0,
+          padding: const EdgeInsets.all(20),
+          child: Row(
+            children: [
+              const AppIconBadge(icon: Icons.home_rounded, size: 44),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Recording for',
+                      style: TextStyle(
+                        color: LandingColors.textSecondary,
+                        fontSize: AppText.caption,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      widget.household.name,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: LandingColors.textPrimary,
+                        fontSize: AppText.cardTitle + 1,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    if (meter != null && meter.isNotEmpty) ...[
+                      const SizedBox(height: 2),
+                      Text(
+                        'Meter $meter',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          color: LandingColors.textSecondary,
+                          fontSize: AppText.caption + 0.5,
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 16),
+        GlassCard(
+          blur: 0,
+          padding: const EdgeInsets.fromLTRB(20, 18, 20, 20),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Tips for accurate readings',
+                style: TextStyle(
+                  color: LandingColors.textPrimary,
+                  fontSize: AppText.cardTitle,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              const SizedBox(height: 12),
+              const _Tip(
+                text: 'Use the number shown on your electricity meter.',
+              ),
+              const _Tip(
+                text:
+                    'The previous reading is your last saved one. Change it '
+                    'if it is not correct.',
+              ),
+              const _Tip(
+                text: 'The current reading must be higher than the previous.',
+              ),
+              const _Tip(text: 'You can use up to 2 decimal places.'),
+            ],
+          ),
+        ),
+      ],
     );
   }
 
@@ -444,7 +668,7 @@ class _RecordConsumptionScreenState extends State<RecordConsumptionScreen> {
 
   String? _validatePrevious(String? value) {
     final text = value?.trim() ?? '';
-    if (text.isEmpty) return 'Previous meter reading is required';
+    if (text.isEmpty) return 'Enter the previous meter reading';
 
     final number = double.tryParse(text);
     if (number == null) return 'Enter a valid number, e.g. 211.00';
@@ -454,7 +678,7 @@ class _RecordConsumptionScreenState extends State<RecordConsumptionScreen> {
 
   String? _validateCurrent(String? value) {
     final text = value?.trim() ?? '';
-    if (text.isEmpty) return 'Current meter reading is required';
+    if (text.isEmpty) return 'Enter the current meter reading';
 
     final current = double.tryParse(text);
     if (current == null) return 'Enter a valid number, e.g. 223.50';
@@ -463,7 +687,8 @@ class _RecordConsumptionScreenState extends State<RecordConsumptionScreen> {
     // The current reading must be higher than the previous one.
     final previous = double.tryParse(_previousCtrl.text.trim());
     if (previous != null && current <= previous) {
-      return 'Must be greater than the previous reading';
+      return 'Must be higher than the previous reading '
+          '(${previous.toStringAsFixed(2)})';
     }
     return null;
   }
@@ -473,7 +698,7 @@ class _RecordConsumptionScreenState extends State<RecordConsumptionScreen> {
   /// Removes the time part so only the day is kept.
   DateTime _dateOnly(DateTime d) => DateTime(d.year, d.month, d.day);
 
-  /// Friendly format for the screen, e.g. "01 Nov 2026".
+  /// Friendly format for the screen, e.g. "Nov 1, 2026".
   String _displayDate(DateTime d) {
     const months = [
       'Jan',
@@ -489,7 +714,151 @@ class _RecordConsumptionScreenState extends State<RecordConsumptionScreen> {
       'Nov',
       'Dec',
     ];
-    final day = d.day.toString().padLeft(2, '0');
-    return '$day ${months[d.month - 1]} ${d.year}';
+    return '${months[d.month - 1]} ${d.day}, ${d.year}';
+  }
+}
+
+// ── Small building blocks ───────────────────────────────────────────────────
+
+/// A numbered heading for one part of the form.
+class _StepHeader extends StatelessWidget {
+  final int number;
+  final String title;
+  final String subtitle;
+
+  const _StepHeader({
+    required this.number,
+    required this.title,
+    required this.subtitle,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Container(
+          width: 28,
+          height: 28,
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            color: LandingColors.primary.withValues(alpha: 0.12),
+          ),
+          child: Text(
+            '$number',
+            style: TextStyle(
+              color: LandingColors.primary,
+              fontSize: 13,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                title,
+                style: TextStyle(
+                  color: LandingColors.textPrimary,
+                  fontSize: AppText.cardTitle + 1,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              const SizedBox(height: 2),
+              Text(
+                subtitle,
+                style: TextStyle(
+                  color: LandingColors.textSecondary,
+                  fontSize: 13,
+                  height: 1.45,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// One line in the tips list.
+class _Tip extends StatelessWidget {
+  final String text;
+
+  const _Tip({required this.text});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.only(top: 1),
+            child: Icon(
+              Icons.check_circle_outline_rounded,
+              size: 16,
+              color: LandingColors.primary,
+            ),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              text,
+              style: TextStyle(
+                color: LandingColors.textSecondary,
+                fontSize: 13,
+                height: 1.45,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// A message shown on the form when saving fails.
+class _ErrorBanner extends StatelessWidget {
+  final String message;
+
+  const _ErrorBanner({required this.message});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      decoration: BoxDecoration(
+        color: LandingColors.danger.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(LandingRadius.control),
+        border: Border.all(color: LandingColors.danger.withValues(alpha: 0.35)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(
+            Icons.error_outline_rounded,
+            size: 18,
+            color: LandingColors.danger,
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              message,
+              style: TextStyle(
+                color: LandingColors.textPrimary,
+                fontSize: 13.5,
+                height: 1.45,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 }

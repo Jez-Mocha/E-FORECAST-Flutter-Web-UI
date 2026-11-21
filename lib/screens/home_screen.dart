@@ -1,10 +1,10 @@
 import 'package:flutter/material.dart';
 
 import '../landing/landing_about_cta_footer.dart';
-import '../landing/landing_dashboard.dart';
 import '../landing/landing_features_workflow.dart';
 import '../landing/landing_hero.dart';
 import '../landing/landing_navbar.dart';
+import '../theme/app_effects.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -47,36 +47,39 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: Column(
-        children: [
-          LandingNavbar(
-            onHomeTap: _scrollToTop,
-            onFeaturesTap: () => _scrollTo(_featuresKey),
-            onHowItWorksTap: () => _scrollTo(_howItWorksKey),
-            onAboutTap: () => _scrollTo(_aboutKey),
-          ),
-          Expanded(
-            child: SingleChildScrollView(
-              controller: _scrollController,
-              child: Column(
-                children: [
-                  LandingHero(onExploreFeatures: () => _scrollTo(_featuresKey)),
-                  LandingFeaturesSection(key: _featuresKey),
-                  LandingHowItWorksSection(key: _howItWorksKey),
-                  const LandingDashboardSection(),
-                  LandingAboutSection(key: _aboutKey),
-                  const LandingCtaSection(),
-                  LandingFooter(
-                    onHomeTap: _scrollToTop,
-                    onFeaturesTap: () => _scrollTo(_featuresKey),
-                    onHowItWorksTap: () => _scrollTo(_howItWorksKey),
-                    onAboutTap: () => _scrollTo(_aboutKey),
-                  ),
-                ],
+      body: AppBackground(
+        child: Column(
+          children: [
+            LandingNavbar(
+              onHomeTap: _scrollToTop,
+              onFeaturesTap: () => _scrollTo(_featuresKey),
+              onHowItWorksTap: () => _scrollTo(_howItWorksKey),
+              onAboutTap: () => _scrollTo(_aboutKey),
+            ),
+            Expanded(
+              child: SingleChildScrollView(
+                controller: _scrollController,
+                child: Column(
+                  children: [
+                    LandingHero(
+                      onExploreFeatures: () => _scrollTo(_featuresKey),
+                    ),
+                    LandingFeaturesSection(key: _featuresKey),
+                    LandingHowItWorksSection(key: _howItWorksKey),
+                    LandingAboutSection(key: _aboutKey),
+                    const LandingCtaSection(),
+                    LandingFooter(
+                      onHomeTap: _scrollToTop,
+                      onFeaturesTap: () => _scrollTo(_featuresKey),
+                      onHowItWorksTap: () => _scrollTo(_howItWorksKey),
+                      onAboutTap: () => _scrollTo(_aboutKey),
+                    ),
+                  ],
+                ),
               ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }

@@ -1,10 +1,11 @@
 import 'package:flutter/material.dart';
 
+import '../theme/app_effects.dart';
 import '../theme/landing_colors.dart';
 import 'landing_widgets.dart';
 
-/// Navbar: logo, Home / Features / How It Works / About, Login, Get Started.
-/// Collapses to a menu on narrow screens.
+/// Floating glass navbar: logo, Home / Features / How It Works / About,
+/// Login, Get Started. Collapses to a menu in narrow windows.
 class LandingNavbar extends StatelessWidget {
   final VoidCallback onHomeTap;
   final VoidCallback onFeaturesTap;
@@ -21,26 +22,20 @@ class LandingNavbar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      decoration: BoxDecoration(
-        color: LandingColors.background.withValues(alpha: 0.96),
-        border: Border(bottom: BorderSide(color: LandingColors.border)),
-      ),
-      child: SafeArea(
-        bottom: false,
-        child: Center(
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 1200),
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+    return SafeArea(
+      bottom: false,
+      child: Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 1200),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(24, 14, 24, 6),
+            child: GlassCard(
+              radius: 18,
+              blur: 14,
+              padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 8),
               child: LayoutBuilder(
-                builder: (context, constraints) {
-                  final isDesktop = constraints.maxWidth >= 820;
-                  final isCompact = constraints.maxWidth < 300;
-                  return isDesktop
-                      ? _desktop(context)
-                      : _mobile(context, isCompact);
-                },
+                builder: (context, c) =>
+                    c.maxWidth >= 760 ? _desktop(context) : _compact(context),
               ),
             ),
           ),
@@ -85,19 +80,11 @@ class LandingNavbar extends StatelessWidget {
     );
   }
 
-  Widget _mobile(BuildContext context, bool isCompact) {
+  Widget _compact(BuildContext context) {
     return Row(
       children: [
         const Flexible(child: LandingLogo()),
         const Spacer(),
-        if (!isCompact) ...[
-          LandingPrimaryButton(
-            label: 'Get Started',
-            large: false,
-            onPressed: () => openLogin(context, tab: 1),
-          ),
-          const SizedBox(width: 4),
-        ],
         _menu(context),
       ],
     );

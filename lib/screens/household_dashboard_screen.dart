@@ -1,12 +1,12 @@
 import 'package:flutter/material.dart';
 
-import '../landing/landing_widgets.dart'
-    show LandingCard, LandingContainer, LandingGrid, SampleDataChip;
+import '../landing/landing_widgets.dart' show SampleDataChip;
 import '../models/household.dart';
-import '../theme/app_theme.dart';
+import '../theme/app_effects.dart';
+import '../theme/app_tokens.dart';
 import '../theme/landing_colors.dart';
 import '../widgets/app_back_link.dart';
-import '../widgets/app_message.dart';
+import '../widgets/app_components.dart';
 import '../widgets/app_top_bar.dart';
 import 'forecast_bill_screen.dart';
 import 'record_consumption_screen.dart';
@@ -15,22 +15,12 @@ import 'usage_monitoring_screen.dart';
 
 /// SCR-05: Selected Household Dashboard.
 /// Shows the details of the household it receives. Record Consumption, Usage
-/// History and Usage Monitoring open their own screens. Forecast & Bill is
-/// not built yet, so it shows a temporary message. This is a UI preview:
-/// there are no forecasts for the household.
+/// History, Usage Monitoring and Forecast & Bill open their own screens.
 class HouseholdDashboardScreen extends StatelessWidget {
   final Household household;
 
   const HouseholdDashboardScreen({super.key, required this.household});
 
-  void _comingSoon(BuildContext context, String feature) {
-    showTemporaryMessage(
-      context,
-      '$feature is not built yet. Temporary message.',
-    );
-  }
-
-  /// Opens the Record Consumption screen for this household.
   void _openRecordConsumption(BuildContext context) {
     Navigator.of(context).push(
       MaterialPageRoute(
@@ -39,7 +29,6 @@ class HouseholdDashboardScreen extends StatelessWidget {
     );
   }
 
-  /// Opens the Usage History screen for this household.
   void _openUsageHistory(BuildContext context) {
     Navigator.of(context).push(
       MaterialPageRoute(
@@ -48,7 +37,6 @@ class HouseholdDashboardScreen extends StatelessWidget {
     );
   }
 
-  /// Opens the Forecast & Bill screen for this household.
   void _openForecastBill(BuildContext context) {
     Navigator.of(context).push(
       MaterialPageRoute(
@@ -57,7 +45,6 @@ class HouseholdDashboardScreen extends StatelessWidget {
     );
   }
 
-  /// Opens the Usage Monitoring screen for this household.
   void _openUsageMonitoring(BuildContext context) {
     Navigator.of(context).push(
       MaterialPageRoute(
@@ -68,22 +55,23 @@ class HouseholdDashboardScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final compact = MediaQuery.sizeOf(context).width < 600;
+    final note = _noteFor(household);
 
-    // Same pattern as the other screens: the theme-aware light theme.
-    return Theme(
-      data: AppTheme.lightTheme,
-      child: Scaffold(
-        backgroundColor: LandingColors.backgroundSoft,
-        body: Column(
+    // Inherit the app's selected theme instead of forcing light mode.
+    return Scaffold(
+      backgroundColor: Colors.transparent,
+      body: AppBackground(
+        child: Column(
           children: [
             const AppTopBar(),
             Expanded(
               child: SingleChildScrollView(
-                child: LandingContainer(
-                  maxWidth: 960,
-                  child: Padding(
-                    padding: EdgeInsets.symmetric(vertical: compact ? 20 : 40),
+                padding: const EdgeInsets.fromLTRB(24, 8, 24, 32),
+                child: Center(
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(
+                      maxWidth: AppLayout.contentMaxWidth,
+                    ),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
@@ -91,36 +79,36 @@ class HouseholdDashboardScreen extends StatelessWidget {
                           label: 'My Households',
                           onPressed: () => Navigator.of(context).pop(),
                         ),
-                        const SizedBox(height: 12),
+                        const SizedBox(height: 8),
                         _HouseholdHeader(household: household),
-                        const SizedBox(height: 20),
-                        _DetailsCard(household: household),
-                        const SizedBox(height: 20),
-                        _PreviewNotice(isSample: household.isSample),
-                        const SizedBox(height: 24),
+                        if (note != null) ...[
+                          const SizedBox(height: 14),
+                          _InfoNote(text: note),
+                        ],
+                        const SizedBox(height: 32),
                         Text(
                           'Household tools',
                           style: TextStyle(
                             color: LandingColors.textPrimary,
-                            fontSize: 18,
+                            fontSize: AppText.sectionTitle,
                             fontWeight: FontWeight.w700,
+                            letterSpacing: -0.2,
                           ),
                         ),
-                        const SizedBox(height: 12),
-                        _ActionGrid(
-                          onAction: (feature) {
-                            if (feature == 'Record Consumption') {
-                              _openRecordConsumption(context);
-                            } else if (feature == 'Usage History') {
-                              _openUsageHistory(context);
-                            } else if (feature == 'Usage Monitoring') {
-                              _openUsageMonitoring(context);
-                            } else if (feature == 'Forecast & Bill') {
-                              _openForecastBill(context);
-                            } else {
-                              _comingSoon(context, feature);
-                            }
-                          },
+                        const SizedBox(height: 4),
+                        Text(
+                          'Record your latest readings, then review usage and bills.',
+                          style: TextStyle(
+                            color: LandingColors.textSecondary,
+                            fontSize: AppText.body,
+                          ),
+                        ),
+                        const SizedBox(height: 16),
+                        _ToolGrid(
+                          onRecord: () => _openRecordConsumption(context),
+                          onHistory: () => _openUsageHistory(context),
+                          onMonitoring: () => _openUsageMonitoring(context),
+                          onForecast: () => _openForecastBill(context),
                         ),
                       ],
                     ),
@@ -135,14 +123,33 @@ class HouseholdDashboardScreen extends StatelessWidget {
   }
 }
 
-/// Formats the rate for display, e.g. 12.5 -> "₱12.50 per kWh".
-/// Keeps up to 4 decimals if the user entered them.
+// ── Display helpers ─────────────────────────────────────────────────────────
+
+/// Formats a rate without unnecessary trailing zeros.
+/// Examples: 12.5000 -> 12.5, 12.0000 -> 12, 12.3456 -> 12.3456.
 String _formatRate(double rate) {
-  final text = rate.toStringAsFixed(4).replaceFirst(RegExp(r'0{1,2}$'), '');
-  return '₱$text per kWh';
+  final text = rate.toStringAsFixed(4).replaceFirst(RegExp(r'\.?0+$'), '');
+  return '₱$text';
 }
 
-/// House icon, household name and address.
+/// True when the household has none of the details that the server does not
+/// return (occupants, provider, rate).
+bool _detailsMissing(Household h) =>
+    h.occupants <= 0 && h.provider.trim().isEmpty && h.ratePerKwh <= 0;
+
+/// The short note under the header, or null when there is nothing to say.
+String? _noteFor(Household h) {
+  if (h.isSample) {
+    return 'This is a sample household. Its values are placeholders.';
+  }
+  if (h.occupants <= 0 || h.provider.trim().isEmpty || h.ratePerKwh <= 0) {
+    return 'Some household details are not available for this household.';
+  }
+  return null;
+}
+
+// ── Header: identity + household details in one card ────────────────────────
+
 class _HouseholdHeader extends StatelessWidget {
   final Household household;
 
@@ -150,68 +157,364 @@ class _HouseholdHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final compact = MediaQuery.sizeOf(context).width < 600;
+    final meter = household.meterNumber?.trim();
+    final missingAll = _detailsMissing(household);
+    final occupants = household.occupants;
 
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Container(
-          width: 52,
-          height: 52,
-          decoration: BoxDecoration(
-            color: LandingColors.periwinkleTint,
-            borderRadius: BorderRadius.circular(LandingRadius.card),
-          ),
-          child: Icon(
-            Icons.home_rounded,
-            color: LandingColors.primary,
-            size: 28,
-          ),
-        ),
-        const SizedBox(width: 14),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+    return GlassCard(
+      blur: 0,
+      padding: const EdgeInsets.fromLTRB(28, 26, 28, 26),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
             children: [
-              Text(
-                household.name,
-                style: TextStyle(
-                  color: LandingColors.textPrimary,
-                  fontSize: compact ? 24 : 28,
-                  fontWeight: FontWeight.w700,
-                  letterSpacing: -0.3,
-                  height: 1.2,
-                ),
-              ),
-              const SizedBox(height: 6),
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Padding(
-                    padding: const EdgeInsets.only(top: 2),
-                    child: Icon(
-                      Icons.location_on_outlined,
-                      size: 16,
-                      color: LandingColors.textSecondary,
-                    ),
-                  ),
-                  const SizedBox(width: 4),
-                  Expanded(
-                    child: Text(
-                      household.address,
+              const AppIconBadge(icon: Icons.home_rounded, size: 60),
+              const SizedBox(width: 18),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      household.name,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                       style: TextStyle(
-                        color: LandingColors.textSecondary,
-                        fontSize: 14,
-                        height: 1.5,
+                        color: LandingColors.textPrimary,
+                        fontSize: 30,
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: -0.5,
+                        height: 1.15,
                       ),
                     ),
-                  ),
+                    const SizedBox(height: 6),
+                    Row(
+                      children: [
+                        Icon(
+                          Icons.location_on_outlined,
+                          size: 16,
+                          color: LandingColors.textSecondary,
+                        ),
+                        const SizedBox(width: 4),
+                        Flexible(
+                          child: Text(
+                            household.address,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              color: LandingColors.textSecondary,
+                              fontSize: AppText.body,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 16),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                children: [
+                  if (meter != null && meter.isNotEmpty)
+                    _MeterChip(meter: meter),
+                  if (household.isSample)
+                    const SampleDataChip(label: 'Sample data'),
                 ],
               ),
-              if (household.isSample) ...[
-                const SizedBox(height: 10),
-                const SampleDataChip(label: 'Sample data'),
-              ],
+            ],
+          ),
+          const SizedBox(height: 22),
+          Divider(color: LandingColors.border, height: 1),
+          const SizedBox(height: 18),
+          Text(
+            'HOUSEHOLD DETAILS',
+            style: TextStyle(
+              color: LandingColors.textSecondary,
+              fontSize: AppText.caption,
+              fontWeight: FontWeight.w700,
+              letterSpacing: 0.8,
+            ),
+          ),
+          const SizedBox(height: 12),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: _DetailTile(
+                  icon: Icons.people_outline_rounded,
+                  label: 'Occupants',
+                  value: occupants <= 0 ? null : '$occupants',
+                  unit: occupants == 1 ? 'occupant' : 'occupants',
+                ),
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: _DetailTile(
+                  icon: Icons.bolt_rounded,
+                  label: 'Electricity provider',
+                  value: household.provider.trim().isEmpty
+                      ? null
+                      : household.provider.trim(),
+                ),
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: _DetailTile(
+                  icon: Icons.payments_outlined,
+                  label: 'Rate per kWh',
+                  value: household.ratePerKwh <= 0
+                      ? null
+                      : _formatRate(household.ratePerKwh),
+                  unit: 'per kWh',
+                ),
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: _DetailTile(
+                  icon: Icons.event_outlined,
+                  label: 'Billing cycle',
+                  value: missingAll ? null : 'Day ${household.billingCycleDay}',
+                  unit: 'of the month',
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _MeterChip extends StatelessWidget {
+  final String meter;
+
+  const _MeterChip({required this.meter});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+      decoration: BoxDecoration(
+        color: LandingColors.primary.withValues(alpha: 0.10),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(
+          color: LandingColors.primary.withValues(alpha: 0.25),
+        ),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.speed_rounded, size: 15, color: LandingColors.primary),
+          const SizedBox(width: 6),
+          Text(
+            'Meter $meter',
+            style: TextStyle(
+              color: LandingColors.primary,
+              fontSize: 12.5,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// One household detail: small icon and label on top, a prominent value below.
+/// A null [value] shows a muted "Not set".
+class _DetailTile extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final String? value;
+  final String? unit;
+
+  const _DetailTile({
+    required this.icon,
+    required this.label,
+    required this.value,
+    this.unit,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final missing = value == null;
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
+      decoration: AppEffects.insetDecoration(radius: AppRadius.card),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(icon, size: 18, color: LandingColors.primary),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: LandingColors.textSecondary,
+                    fontSize: AppText.caption,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          if (missing)
+            Text(
+              'Not set',
+              style: TextStyle(
+                color: LandingColors.textSecondary,
+                fontSize: 17,
+                fontWeight: FontWeight.w600,
+                height: 1.2,
+              ),
+            )
+          else
+            Text.rich(
+              TextSpan(
+                children: [
+                  TextSpan(
+                    text: value,
+                    style: TextStyle(
+                      color: LandingColors.textPrimary,
+                      fontSize: 19,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: -0.2,
+                    ),
+                  ),
+                  if (unit != null)
+                    TextSpan(
+                      text: '  $unit',
+                      style: TextStyle(
+                        color: LandingColors.textSecondary,
+                        fontSize: 13,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                ],
+              ),
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(height: 1.25),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+/// A slim one-line note. Replaces the old "Preview" banner.
+class _InfoNote extends StatelessWidget {
+  final String text;
+
+  const _InfoNote({required this.text});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 4),
+      child: Row(
+        children: [
+          Icon(
+            Icons.info_outline_rounded,
+            size: 16,
+            color: LandingColors.textSecondary,
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              text,
+              style: TextStyle(
+                color: LandingColors.textSecondary,
+                fontSize: 13,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ── Household tools ─────────────────────────────────────────────────────────
+
+/// Record Consumption as a full-width primary card, then the three other
+/// tools in an equal row below it.
+class _ToolGrid extends StatelessWidget {
+  final VoidCallback onRecord;
+  final VoidCallback onHistory;
+  final VoidCallback onMonitoring;
+  final VoidCallback onForecast;
+
+  const _ToolGrid({
+    required this.onRecord,
+    required this.onHistory,
+    required this.onMonitoring,
+    required this.onForecast,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    const gap = 16.0;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _PrimaryToolCard(
+          icon: Icons.edit_note_rounded,
+          title: 'Record Consumption',
+          description:
+              'Enter your previous and current meter readings to keep your '
+              'usage, forecast and bill up to date.',
+          actionLabel: 'Record readings',
+          onTap: onRecord,
+        ),
+        const SizedBox(height: gap),
+        IntrinsicHeight(
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Expanded(
+                child: _ToolCard(
+                  icon: Icons.history_rounded,
+                  accent: AppAccent.purple,
+                  title: 'Usage History',
+                  description:
+                      'Browse past readings and how much you used each period.',
+                  onTap: onHistory,
+                ),
+              ),
+              const SizedBox(width: gap),
+              Expanded(
+                child: _ToolCard(
+                  icon: Icons.show_chart_rounded,
+                  accent: AppAccent.green,
+                  title: 'Usage Monitoring',
+                  description:
+                      'Follow your electricity usage trends over time.',
+                  onTap: onMonitoring,
+                ),
+              ),
+              const SizedBox(width: gap),
+              Expanded(
+                child: _ToolCard(
+                  icon: Icons.auto_graph_rounded,
+                  accent: AppAccent.orange,
+                  title: 'Forecast & Bill',
+                  description: 'See projected usage and an estimated bill for this cycle.',
+                  onTap: onForecast,
+                ),
+              ),
             ],
           ),
         ),
@@ -220,276 +523,242 @@ class _HouseholdHeader extends StatelessWidget {
   }
 }
 
-/// Occupants, provider, rate per kWh and billing cycle day.
-class _DetailsCard extends StatelessWidget {
-  final Household household;
+/// The primary action: a full-width blue card with a clear call to action.
+class _PrimaryToolCard extends StatefulWidget {
+  final IconData icon;
+  final String title;
+  final String description;
+  final String actionLabel;
+  final VoidCallback onTap;
 
-  const _DetailsCard({required this.household});
+  const _PrimaryToolCard({
+    required this.icon,
+    required this.title,
+    required this.description,
+    required this.actionLabel,
+    required this.onTap,
+  });
+
+  @override
+  State<_PrimaryToolCard> createState() => _PrimaryToolCardState();
+}
+
+class _PrimaryToolCardState extends State<_PrimaryToolCard> {
+  bool _hover = false;
 
   @override
   Widget build(BuildContext context) {
-    final compact = MediaQuery.sizeOf(context).width < 600;
-    final occupants = household.occupants;
+    final radius = BorderRadius.circular(LandingRadius.card);
+    final onPrimary = LandingColors.onPrimary;
 
-    return SizedBox(
-      width: double.infinity,
-      child: LandingCard(
-        padding: EdgeInsets.all(compact ? 20 : 24),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'Household details',
-              style: TextStyle(
-                color: LandingColors.textPrimary,
-                fontSize: 16,
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-            const SizedBox(height: 4),
-            _DetailRow(
-              icon: Icons.people_outline_rounded,
-              label: 'Occupants',
-              value: occupants == 1 ? '1 occupant' : '$occupants occupants',
-            ),
-            Divider(color: LandingColors.border, height: 1),
-            _DetailRow(
-              icon: Icons.bolt_rounded,
-              label: 'Electricity provider',
-              value: household.provider,
-            ),
-            Divider(color: LandingColors.border, height: 1),
-            _DetailRow(
-              icon: Icons.payments_outlined,
-              label: 'Rate per kWh',
-              value: _formatRate(household.ratePerKwh),
-            ),
-            Divider(color: LandingColors.border, height: 1),
-            _DetailRow(
-              icon: Icons.event_outlined,
-              label: 'Billing cycle day',
-              value: 'Day ${household.billingCycleDay} of the month',
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      onEnter: (_) => setState(() => _hover = true),
+      onExit: (_) => setState(() => _hover = false),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 160),
+        curve: Curves.easeOut,
+        transform: Matrix4.translationValues(0, _hover ? -3 : 0, 0),
+        decoration: BoxDecoration(
+          gradient: LandingColors.primaryGradient,
+          borderRadius: radius,
+          boxShadow: [
+            BoxShadow(
+              color: LandingColors.primary.withValues(alpha: 0.22),
+              blurRadius: 24,
+              offset: const Offset(0, 10),
             ),
           ],
+        ),
+        child: Material(
+          color: Colors.transparent,
+          child: InkWell(
+            borderRadius: radius,
+            onTap: widget.onTap,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 26),
+              child: Row(
+                children: [
+                  Container(
+                    width: 64,
+                    height: 64,
+                    decoration: BoxDecoration(
+                      color: onPrimary.withValues(alpha: 0.18),
+                      borderRadius: BorderRadius.circular(18),
+                      border: Border.all(
+                        color: onPrimary.withValues(alpha: 0.28),
+                      ),
+                    ),
+                    child: Icon(widget.icon, color: onPrimary, size: 34),
+                  ),
+                  const SizedBox(width: 22),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          widget.title,
+                          style: TextStyle(
+                            color: onPrimary,
+                            fontSize: 22,
+                            fontWeight: FontWeight.w800,
+                            letterSpacing: -0.3,
+                          ),
+                        ),
+                        const SizedBox(height: 6),
+                        Text(
+                          widget.description,
+                          style: TextStyle(
+                            color: onPrimary.withValues(alpha: 0.9),
+                            fontSize: 14.5,
+                            height: 1.45,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 24),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 20,
+                      vertical: 13,
+                    ),
+                    decoration: BoxDecoration(
+                      color: onPrimary,
+                      borderRadius: BorderRadius.circular(999),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          widget.actionLabel,
+                          style: TextStyle(
+                            color: LandingColors.primary,
+                            fontSize: 14.5,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Icon(
+                          Icons.arrow_forward_rounded,
+                          size: 18,
+                          color: LandingColors.primary,
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
         ),
       ),
     );
   }
 }
 
-/// One label / value line with a small icon.
-class _DetailRow extends StatelessWidget {
+/// A tappable card for one secondary tool. The whole card is the tap target.
+class _ToolCard extends StatefulWidget {
   final IconData icon;
-  final String label;
-  final String value;
-
-  const _DetailRow({
-    required this.icon,
-    required this.label,
-    required this.value,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 12),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Container(
-            width: 36,
-            height: 36,
-            decoration: BoxDecoration(
-              color: LandingColors.periwinkleTint,
-              borderRadius: BorderRadius.circular(LandingRadius.control),
-            ),
-            child: Icon(icon, size: 18, color: LandingColors.primary),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  label,
-                  style: TextStyle(
-                    color: LandingColors.textSecondary,
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  value,
-                  style: TextStyle(
-                    color: LandingColors.textPrimary,
-                    fontSize: 15,
-                    fontWeight: FontWeight.w600,
-                    height: 1.3,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-/// Tells the user this screen is a preview and the tools are not built yet.
-class _PreviewNotice extends StatelessWidget {
-  final bool isSample;
-
-  const _PreviewNotice({required this.isSample});
-
-  @override
-  Widget build(BuildContext context) {
-    final extra = isSample
-        ? ' This is a sample household, so its values are placeholders.'
-        : '';
-
-    return LandingCard(
-      color: LandingColors.periwinkleTint,
-      padding: const EdgeInsets.all(16),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const SampleDataChip(label: 'Preview'),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Text(
-              'This screen is a UI preview. The tools below are not built '
-              'yet, so this household has no readings, usage history or '
-              'forecast.$extra',
-              style: TextStyle(
-                color: LandingColors.textSecondary,
-                fontSize: 13,
-                height: 1.5,
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-/// The four household tools: 2 columns on wide screens, 1 on phones.
-class _ActionGrid extends StatelessWidget {
-  final void Function(String feature) onAction;
-
-  const _ActionGrid({required this.onAction});
-
-  @override
-  Widget build(BuildContext context) {
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final columns = constraints.maxWidth >= 600 ? 2 : 1;
-
-        return LandingGrid(
-          columns: columns,
-          children: [
-            _ActionCard(
-              icon: Icons.edit_note_rounded,
-              title: 'Record Consumption',
-              description: 'Enter previous and current meter readings.',
-              onTap: () => onAction('Record Consumption'),
-            ),
-            _ActionCard(
-              icon: Icons.history_rounded,
-              title: 'Usage History',
-              description: 'Review recorded readings and past usage.',
-              onTap: () => onAction('Usage History'),
-            ),
-            _ActionCard(
-              icon: Icons.show_chart_rounded,
-              title: 'Usage Monitoring',
-              description: 'Track household electricity usage over time.',
-              onTap: () => onAction('Usage Monitoring'),
-            ),
-            _ActionCard(
-              icon: Icons.auto_graph_rounded,
-              title: 'Forecast & Bill',
-              description: 'View a forecast and an estimated bill.',
-              onTap: () => onAction('Forecast & Bill'),
-            ),
-          ],
-        );
-      },
-    );
-  }
-}
-
-/// A tappable card for one tool. The whole card is the tap target.
-class _ActionCard extends StatelessWidget {
-  final IconData icon;
+  final AppAccent accent;
   final String title;
   final String description;
   final VoidCallback onTap;
 
-  const _ActionCard({
+  const _ToolCard({
     required this.icon,
+    required this.accent,
     required this.title,
     required this.description,
     required this.onTap,
   });
 
   @override
+  State<_ToolCard> createState() => _ToolCardState();
+}
+
+class _ToolCardState extends State<_ToolCard> {
+  bool _hover = false;
+
+  @override
   Widget build(BuildContext context) {
-    // The InkWell sits inside the card so its tap ripple stays visible.
-    return LandingCard(
-      padding: EdgeInsets.zero,
-      child: Material(
-        color: Colors.transparent,
-        child: InkWell(
-          borderRadius: BorderRadius.circular(LandingRadius.card),
-          onTap: onTap,
-          child: Padding(
-            padding: const EdgeInsets.all(20),
-            child: Row(
-              children: [
-                Container(
-                  width: 44,
-                  height: 44,
-                  decoration: BoxDecoration(
-                    color: LandingColors.periwinkleTint,
-                    borderRadius: BorderRadius.circular(LandingRadius.control),
-                  ),
-                  child: Icon(icon, color: LandingColors.primary, size: 24),
-                ),
-                const SizedBox(width: 14),
-                Expanded(
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        title,
-                        style: TextStyle(
-                          color: LandingColors.textPrimary,
-                          fontSize: 16,
-                          fontWeight: FontWeight.w700,
+    final color = widget.accent.color;
+
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      onEnter: (_) => setState(() => _hover = true),
+      onExit: (_) => setState(() => _hover = false),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 160),
+        curve: Curves.easeOut,
+        transform: Matrix4.translationValues(0, _hover ? -3 : 0, 0),
+        child: GlassCard(
+          blur: 0,
+          padding: EdgeInsets.zero,
+          child: Material(
+            color: Colors.transparent,
+            child: InkWell(
+              borderRadius: BorderRadius.circular(LandingRadius.card),
+              onTap: widget.onTap,
+              child: Padding(
+                padding: const EdgeInsets.all(22),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Container(
+                          width: 48,
+                          height: 48,
+                          decoration: BoxDecoration(
+                            color: widget.accent.tint,
+                            borderRadius: BorderRadius.circular(14),
+                            border: Border.all(
+                              color: color.withValues(alpha: 0.22),
+                            ),
+                          ),
+                          child: Icon(widget.icon, color: color, size: 26),
                         ),
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        description,
-                        style: TextStyle(
-                          color: LandingColors.textSecondary,
-                          fontSize: 13,
-                          height: 1.5,
+                        const Spacer(),
+                        AnimatedContainer(
+                          duration: const Duration(milliseconds: 160),
+                          width: 32,
+                          height: 32,
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            color: _hover
+                                ? color
+                                : color.withValues(alpha: 0.10),
+                          ),
+                          child: Icon(
+                            Icons.arrow_forward_rounded,
+                            size: 17,
+                            color: _hover ? Colors.white : color,
+                          ),
                         ),
+                      ],
+                    ),
+                    const SizedBox(height: 16),
+                    Text(
+                      widget.title,
+                      style: TextStyle(
+                        color: LandingColors.textPrimary,
+                        fontSize: 17,
+                        fontWeight: FontWeight.w700,
                       ),
-                    ],
-                  ),
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      widget.description,
+                      style: TextStyle(
+                        color: LandingColors.textSecondary,
+                        fontSize: 13.5,
+                        height: 1.45,
+                      ),
+                    ),
+                  ],
                 ),
-                const SizedBox(width: 8),
-                Icon(
-                  Icons.chevron_right_rounded,
-                  color: LandingColors.textSecondary,
-                ),
-              ],
+              ),
             ),
           ),
         ),

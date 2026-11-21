@@ -1,9 +1,8 @@
 import 'package:flutter/material.dart';
 
+import '../theme/app_effects.dart';
 import '../theme/landing_colors.dart';
 import 'landing_widgets.dart';
-
-// ─── ABOUT ───────────────────────────────────────────────────────────────
 
 const List<String> _aboutPoints = [
   'Household-focused monitoring',
@@ -13,106 +12,71 @@ const List<String> _aboutPoints = [
   'Estimated electricity bills',
 ];
 
+// ── About ────────────────────────────────────────────────────────────────
+
 class LandingAboutSection extends StatelessWidget {
   const LandingAboutSection({super.key});
 
   @override
   Widget build(BuildContext context) {
-    return LandingSection(
-      color: LandingColors.backgroundSoft,
-      child: LayoutBuilder(
-        builder: (context, constraints) {
-          final isDesktop = constraints.maxWidth >= 900;
-          const copy = _AboutCopy();
-          const list = _AboutList();
-          if (isDesktop) {
-            return Row(
-              crossAxisAlignment: CrossAxisAlignment.center,
-              children: [
-                Expanded(flex: 11, child: copy),
-                const SizedBox(width: 56),
-                Expanded(flex: 9, child: list),
-              ],
-            );
-          }
-          return Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [copy, const SizedBox(height: 32), list],
-          );
-        },
-      ),
-    );
-  }
-}
-
-class _AboutCopy extends StatelessWidget {
-  const _AboutCopy();
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
+    final copy = Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        LandingSectionHeader(
+        const LandingSectionHeader(
           tag: 'About E-FORECAST',
           title: 'Smarter Insights for Household Electricity',
           subtitle: 'E-FORECAST combines household electricity monitoring with machine learning-based forecasting to help users better understand their consumption and explore potential future electricity costs.',
-          centered: false,
         ),
-        SizedBox(height: 20),
-        Text(
-          'A college Information Technology system development project.',
-          style: TextStyle(
-            color: LandingColors.textSecondary,
-            fontSize: 14,
-            fontStyle: FontStyle.italic,
-          ),
+        const SizedBox(height: 20),
+        Row(
+          children: [
+            Icon(Icons.school_rounded, size: 18, color: LandingColors.purple),
+            const SizedBox(width: 8),
+            Flexible(
+              child: Text(
+                'A college Information Technology system development project.',
+                style: TextStyle(
+                  color: LandingColors.textSecondary,
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+          ],
         ),
       ],
     );
-  }
-}
 
-class _AboutList extends StatelessWidget {
-  const _AboutList();
-
-  @override
-  Widget build(BuildContext context) {
-    return LandingCard(
+    final list = GlassCard(
+      blur: 0,
       padding: const EdgeInsets.all(28),
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           for (var i = 0; i < _aboutPoints.length; i++) ...[
             if (i > 0) const SizedBox(height: 16),
             Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Container(
-                  width: 26,
-                  height: 26,
+                  width: 28,
+                  height: 28,
                   decoration: BoxDecoration(
-                    color: LandingColors.periwinkleTint,
                     shape: BoxShape.circle,
+                    color: LandingColors.primary.withValues(alpha: 0.12),
                   ),
                   child: Icon(
                     Icons.check_rounded,
-                    size: 16,
+                    size: 17,
                     color: LandingColors.primary,
                   ),
                 ),
                 const SizedBox(width: 14),
                 Expanded(
-                  child: Padding(
-                    padding: const EdgeInsets.only(top: 2),
-                    child: Text(
-                      _aboutPoints[i],
-                      style: TextStyle(
-                        color: LandingColors.textPrimary,
-                        fontSize: 15,
-                        fontWeight: FontWeight.w500,
-                        height: 1.4,
-                      ),
+                  child: Text(
+                    _aboutPoints[i],
+                    style: TextStyle(
+                      color: LandingColors.textPrimary,
+                      fontSize: 15,
+                      fontWeight: FontWeight.w600,
                     ),
                   ),
                 ),
@@ -122,67 +86,134 @@ class _AboutList extends StatelessWidget {
         ],
       ),
     );
+
+    return LandingSection(
+      color: Colors.transparent,
+      child: LayoutBuilder(
+        builder: (context, c) {
+          if (c.maxWidth >= 900) {
+            return Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                Expanded(child: copy),
+                const SizedBox(width: 56),
+                Expanded(child: list),
+              ],
+            );
+          }
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [copy, const SizedBox(height: 32), list],
+          );
+        },
+      ),
+    );
   }
 }
 
-// ─── CTA ─────────────────────────────────────────────────────────────────
+// ── Call to action ───────────────────────────────────────────────────────
 
 class LandingCtaSection extends StatelessWidget {
   const LandingCtaSection({super.key});
 
   @override
   Widget build(BuildContext context) {
-    final compact = MediaQuery.sizeOf(context).width < 640;
-    return LandingSection(
-      maxWidth: 1000,
-      child: Container(
-        width: double.infinity,
-        padding: EdgeInsets.symmetric(
-          horizontal: compact ? 24 : 56,
-          vertical: compact ? 40 : 64,
-        ),
-        decoration: BoxDecoration(
-          gradient: LandingColors.ctaGradient,
+    return LandingContainer(
+      child: Padding(
+        padding: const EdgeInsets.only(top: 24, bottom: 72),
+        child: ClipRRect(
           borderRadius: BorderRadius.circular(28),
-          border: Border.all(color: LandingColors.border),
-          boxShadow: LandingColors.softShadow,
-        ),
-        child: Column(
-          children: [
-            Text(
-              'Take the Next Step Toward Understanding Your Energy.',
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                color: LandingColors.textPrimary,
-                fontSize: compact ? 26 : 36,
-                fontWeight: FontWeight.w800,
-                letterSpacing: -0.8,
-                height: 1.2,
-              ),
+          child: Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 56),
+            decoration: BoxDecoration(gradient: LandingColors.primaryGradient),
+            child: Stack(
+              children: [
+                Positioned(top: -90, right: -60, child: _ring(260, 0.10)),
+                Positioned(bottom: -120, left: -80, child: _ring(300, 0.08)),
+                Center(
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 680),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Icon(
+                          Icons.bolt_rounded,
+                          color: Colors.white,
+                          size: 36,
+                        ),
+                        const SizedBox(height: 16),
+                        const Text(
+                          'Take the Next Step Toward Understanding Your Energy.',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 30,
+                            fontWeight: FontWeight.w800,
+                            height: 1.25,
+                            letterSpacing: -0.4,
+                          ),
+                        ),
+                        const SizedBox(height: 14),
+                        Text(
+                          'Explore household electricity monitoring and forecasting with E-FORECAST.',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            color: Colors.white.withValues(alpha: 0.9),
+                            fontSize: 16,
+                            height: 1.6,
+                          ),
+                        ),
+                        const SizedBox(height: 28),
+                        ElevatedButton(
+                          onPressed: () => openLogin(context, tab: 1),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.white,
+                            foregroundColor: LandingColors.primary,
+                            elevation: 0,
+                            minimumSize: const Size(0, 52),
+                            padding: const EdgeInsets.symmetric(horizontal: 32),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(
+                                LandingRadius.control,
+                              ),
+                            ),
+                            textStyle: const TextStyle(
+                              fontSize: 15,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                          child: const Text('Get Started'),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
             ),
-            const SizedBox(height: 14),
-            Text(
-              'Explore household electricity monitoring and forecasting with E-FORECAST.',
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                color: LandingColors.textSecondary,
-                fontSize: 16,
-                height: 1.6,
-              ),
-            ),
-            const SizedBox(height: 28),
-            LandingPrimaryButton(
-              label: 'Get Started',
-              onPressed: () => openLogin(context, tab: 1),
-            ),
-          ],
+          ),
         ),
       ),
     );
   }
+
+  static Widget _ring(double size, double alpha) => IgnorePointer(
+    child: Container(
+      width: size,
+      height: size,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        border: Border.all(
+          color: Colors.white.withValues(alpha: alpha * 2),
+          width: 2,
+        ),
+        color: Colors.white.withValues(alpha: alpha),
+      ),
+    ),
+  );
 }
 
-// ─── FOOTER ──────────────────────────────────────────────────────────────
+// ── Footer ───────────────────────────────────────────────────────────────
 
 class LandingFooter extends StatelessWidget {
   final VoidCallback onHomeTap;
@@ -200,92 +231,13 @@ class LandingFooter extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.symmetric(vertical: 48),
-      decoration: BoxDecoration(
-        color: LandingColors.background,
-        border: Border(top: BorderSide(color: LandingColors.border)),
-      ),
-      child: LandingContainer(
-        child: LayoutBuilder(
-          builder: (context, constraints) {
-            final isDesktop = constraints.maxWidth >= 720;
-            const brand = _FooterBrand();
-            final links = Wrap(
-              spacing: 4,
-              runSpacing: 4,
-              children: [
-                _footerLink('Home', onHomeTap),
-                _footerLink('Features', onFeaturesTap),
-                _footerLink('How It Works', onHowItWorksTap),
-                _footerLink('About', onAboutTap),
-                _footerLink('Login', () => openLogin(context, tab: 0)),
-              ],
-            );
-
-            return Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                if (isDesktop)
-                  Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Expanded(child: brand),
-                      const SizedBox(width: 32),
-                      Flexible(child: links),
-                    ],
-                  )
-                else ...[
-                  brand,
-                  const SizedBox(height: 20),
-                  links,
-                ],
-                const SizedBox(height: 28),
-                Divider(color: LandingColors.border, height: 1),
-                const SizedBox(height: 20),
-                Text(
-                  '© ${DateTime.now().year} E-FORECAST. All rights reserved.',
-                  style: TextStyle(
-                    color: LandingColors.textSecondary,
-                    fontSize: 12,
-                  ),
-                ),
-              ],
-            );
-          },
-        ),
-      ),
-    );
-  }
-
-  Widget _footerLink(String label, VoidCallback onTap) {
-    return TextButton(
-      onPressed: onTap,
-      style: TextButton.styleFrom(
-        foregroundColor: LandingColors.textSecondary,
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-      ),
-      child: Text(
-        label,
-        style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500),
-      ),
-    );
-  }
-}
-
-class _FooterBrand extends StatelessWidget {
-  const _FooterBrand();
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
+    final brand = Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         const LandingLogo(),
         const SizedBox(height: 14),
         ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 380),
+          constraints: const BoxConstraints(maxWidth: 360),
           child: Text(
             'An XGBoost-based household electricity consumption and bill forecasting system.',
             style: TextStyle(
@@ -297,5 +249,77 @@ class _FooterBrand extends StatelessWidget {
         ),
       ],
     );
+
+    final links = Wrap(
+      spacing: 4,
+      runSpacing: 4,
+      children: [
+        _link('Home', onHomeTap),
+        _link('Features', onFeaturesTap),
+        _link('How It Works', onHowItWorksTap),
+        _link('About', onAboutTap),
+        _link('Login', () => openLogin(context, tab: 0)),
+      ],
+    );
+
+    return Container(
+      width: double.infinity,
+      decoration: BoxDecoration(
+        color: LandingColors.surface.withValues(alpha: 0.6),
+        border: Border(top: BorderSide(color: LandingColors.border)),
+      ),
+      child: LandingContainer(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 36),
+          child: Column(
+            children: [
+              LayoutBuilder(
+                builder: (context, c) {
+                  if (c.maxWidth >= 800) {
+                    return Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Flexible(child: brand),
+                        links,
+                      ],
+                    );
+                  }
+                  return Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [brand, const SizedBox(height: 20), links],
+                  );
+                },
+              ),
+              const SizedBox(height: 28),
+              Divider(color: LandingColors.border, height: 1),
+              const SizedBox(height: 20),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  '© ${DateTime.now().year} E-FORECAST. All rights reserved.',
+                  style: TextStyle(
+                    color: LandingColors.textSecondary,
+                    fontSize: 13,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
+
+  static Widget _link(String label, VoidCallback onTap) => TextButton(
+    onPressed: onTap,
+    style: TextButton.styleFrom(
+      foregroundColor: LandingColors.textSecondary,
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+    ),
+    child: Text(
+      label,
+      style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500),
+    ),
+  );
 }

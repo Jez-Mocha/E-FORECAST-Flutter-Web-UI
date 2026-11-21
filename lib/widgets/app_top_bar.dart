@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../landing/landing_widgets.dart' show LandingLogo;
+import '../theme/app_effects.dart';
 import '../theme/app_tokens.dart';
 import '../theme/landing_colors.dart';
 
@@ -11,11 +12,8 @@ class AppTopBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      decoration: BoxDecoration(
-        color: LandingColors.background,
-        border: Border(bottom: BorderSide(color: LandingColors.border)),
-      ),
+    return GlassPanel(
+      border: Border(bottom: BorderSide(color: LandingColors.border)),
       child: SafeArea(
         bottom: false,
         child: Center(

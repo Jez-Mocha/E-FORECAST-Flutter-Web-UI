@@ -1,26 +1,25 @@
 import 'package:flutter/material.dart';
 
 import '../landing/landing_widgets.dart'
-    show LandingCard, LandingContainer, LandingPrimaryButton, SampleDataChip;
+    show LandingCard, LandingPrimaryButton, SampleDataChip;
 import '../models/household.dart';
+import '../services/api_service.dart';
+import '../theme/app_effects.dart';
 import '../theme/app_theme.dart';
 import '../theme/app_tokens.dart';
 import '../theme/landing_colors.dart';
+import '../widgets/app_components.dart';
 import '../widgets/app_message.dart';
 import '../widgets/dashboard_sidebar.dart';
-import '../widgets/welcome_greeting.dart';
 import '../widgets/household_card.dart';
+import '../widgets/welcome_greeting.dart';
 import 'add_household_screen.dart';
 import 'home_screen.dart';
 import 'household_dashboard_screen.dart';
 import 'profile_settings_screen.dart';
-import '../services/api_service.dart';
 
 /// SCR-03: Main Dashboard.
 /// Lists the households registered to the signed-in user.
-/// Households are kept in memory for this session (no backend yet).
-/// SCR-11 does not exist yet, so Profile / Settings shows a temporary
-/// SnackBar.
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});
 
@@ -29,9 +28,6 @@ class DashboardScreen extends StatefulWidget {
 }
 
 class _DashboardScreenState extends State<DashboardScreen> {
-  // Starts with the labeled SAMPLE households. Households added on SCR-04
-  // are inserted at the top. To preview the empty state, temporarily start
-  // with an empty list instead: final List<Household> _households = [];
   final List<Household> _households = [];
   bool _isLoadingHouseholds = true;
 
@@ -115,72 +111,86 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final compact = MediaQuery.sizeOf(context).width < 640;
-
-    // Same pattern as LoginScreen: wrap in the theme-aware light theme.
     return Theme(
       data: AppTheme.lightTheme,
       child: Scaffold(
-        backgroundColor: LandingColors.backgroundSoft,
-        body: Row(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            // Left: logo + animated Electricity Rates.
-            const DashboardSidebar(),
+        backgroundColor: Colors.transparent,
+        body: AppBackground(
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              // Left: glass sidebar with navigation and Electricity Rates.
+              DashboardSidebar(onAddHousehold: _addHousehold),
 
-            // Right: top navigation, then the scrolling page content.
-            Expanded(
-              child: Column(
-                children: [
-                  _DashboardTopBar(onProfile: _openProfile, onLogout: _logout),
-                  Expanded(
-                    child: SingleChildScrollView(
-                      child: LandingContainer(
-                        child: Padding(
-                          padding: EdgeInsets.symmetric(
-                            vertical: compact ? 24 : 32,
-                          ),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              const WelcomeGreeting(),
-                              const SizedBox(height: 28),
-                              _DashboardHeader(onAddHousehold: _addHousehold),
-                              const SizedBox(height: 24),
+              // Right: top bar, then the scrolling page content.
+              Expanded(
+                child: Column(
+                  children: [
+                    _DashboardTopBar(
+                      onProfile: _openProfile,
+                      onLogout: _logout,
+                    ),
+                    Expanded(
+                      child: SingleChildScrollView(
+                        padding: const EdgeInsets.fromLTRB(24, 8, 24, 32),
+                        child: Center(
+                          child: ConstrainedBox(
+                            constraints: const BoxConstraints(
+                              maxWidth: AppLayout.contentMaxWidth,
+                            ),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                const WelcomeGreeting(),
+                                const SizedBox(height: 20),
 
-                              if (_isLoadingHouseholds)
-                                const Center(
-                                  child: Padding(
-                                    padding: EdgeInsets.all(32),
-                                    child: CircularProgressIndicator(),
+                                if (!_isLoadingHouseholds) ...[
+                                  _MetricsRow(
+                                    households: _households,
+                                    onAddHousehold: _addHousehold,
                                   ),
-                                )
-                              else
-                                _HouseholdSection(
-                                  households: _households,
-                                  onAddHousehold: _addHousehold,
-                                  onViewHousehold: _viewHousehold,
+                                  const SizedBox(height: 28),
+                                ],
+
+                                _SectionHeader(
+                                  count: _isLoadingHouseholds
+                                      ? null
+                                      : _households.length,
                                 ),
-                            ],
+                                const SizedBox(height: 16),
+
+                                if (_isLoadingHouseholds)
+                                  const Center(
+                                    child: Padding(
+                                      padding: EdgeInsets.all(32),
+                                      child: CircularProgressIndicator(),
+                                    ),
+                                  )
+                                else
+                                  _HouseholdSection(
+                                    households: _households,
+                                    onAddHousehold: _addHousehold,
+                                    onViewHousehold: _viewHousehold,
+                                  ),
+                              ],
+                            ),
                           ),
                         ),
                       ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
   }
 }
 
-enum _AccountAction { profile, logout }
-
-/// Top bar: logo on the left; theme toggle, Profile / Settings and Logout on
-/// the right. On narrow screens the last two collapse into one menu.
+/// Top bar: page title on the left; Profile / Settings and Logout on the
+/// right. (The theme toggle stays only in Profile & Settings.)
 class _DashboardTopBar extends StatelessWidget {
   final VoidCallback onProfile;
   final VoidCallback onLogout;
@@ -189,48 +199,51 @@ class _DashboardTopBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final compact = MediaQuery.sizeOf(context).width < 640;
-
-    return Container(
-      height: DashboardSidebar.headerHeight,
-      decoration: BoxDecoration(
-        color: LandingColors.background,
-        border: Border(bottom: BorderSide(color: LandingColors.border)),
-      ),
-      child: SafeArea(
-        bottom: false,
+    return SafeArea(
+      bottom: false,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(24, 20, 24, 12),
         child: Center(
           child: ConstrainedBox(
             constraints: const BoxConstraints(
               maxWidth: AppLayout.contentMaxWidth,
             ),
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 8),
-              child: Row(
-                children: [
-                  // The logo now lives in the sidebar. This pushes the
-                  // buttons to the right.
-                  const Spacer(),
-                  if (compact)
-                    _buildMenu()
-                  else ...[
-                    const SizedBox(width: 4),
-                    TextButton.icon(
-                      onPressed: onProfile,
-                      icon: const Icon(Icons.person_outline_rounded, size: 18),
-                      label: const Text('Profile / Settings'),
-                      style: _linkStyle(),
-                    ),
-                    const SizedBox(width: 4),
-                    TextButton.icon(
-                      onPressed: onLogout,
-                      icon: const Icon(Icons.logout_rounded, size: 18),
-                      label: const Text('Logout'),
-                      style: _linkStyle(),
-                    ),
-                  ],
-                ],
-              ),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'My Households',
+                        style: TextStyle(
+                          color: LandingColors.textPrimary,
+                          fontSize: AppText.pageTitle,
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: -0.4,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        'Manage the households registered to your account.',
+                        style: TextStyle(
+                          color: LandingColors.textSecondary,
+                          fontSize: 14,
+                          height: 1.5,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 16),
+                _pill(
+                  Icons.person_outline_rounded,
+                  'Profile / Settings',
+                  onProfile,
+                ),
+                const SizedBox(width: 10),
+                _pill(Icons.logout_rounded, 'Logout', onLogout),
+              ],
             ),
           ),
         ),
@@ -238,115 +251,131 @@ class _DashboardTopBar extends StatelessWidget {
     );
   }
 
-  ButtonStyle _linkStyle() {
-    return TextButton.styleFrom(
-      foregroundColor: LandingColors.textSecondary,
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
-      textStyle: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500),
-    );
-  }
-
-  Widget _buildMenu() {
-    return PopupMenuButton<_AccountAction>(
-      tooltip: 'Account menu',
-      icon: Icon(
-        Icons.account_circle_outlined,
-        color: LandingColors.textPrimary,
-        size: 24,
+  Widget _pill(IconData icon, String label, VoidCallback onTap) {
+    return OutlinedButton.icon(
+      onPressed: onTap,
+      icon: Icon(icon, size: 18),
+      label: Text(label),
+      style: OutlinedButton.styleFrom(
+        foregroundColor: LandingColors.textPrimary,
+        backgroundColor: LandingColors.glassFill,
+        side: BorderSide(color: LandingColors.glassBorder),
+        padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
+        shape: const StadiumBorder(),
+        textStyle: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
       ),
-      onSelected: (action) {
-        switch (action) {
-          case _AccountAction.profile:
-            onProfile();
-          case _AccountAction.logout:
-            onLogout();
-        }
-      },
-      itemBuilder: (context) => [
-        PopupMenuItem(
-          value: _AccountAction.profile,
-          child: _menuRow(Icons.person_outline_rounded, 'Profile / Settings'),
-        ),
-        PopupMenuItem(
-          value: _AccountAction.logout,
-          child: _menuRow(Icons.logout_rounded, 'Logout'),
-        ),
-      ],
     );
   }
+}
 
-  Widget _menuRow(IconData icon, String label) {
+/// Three colorful cards. Every number comes from the households that are
+/// already loaded. There is no consumption data on this screen, so there
+/// are no usage numbers or sparklines here.
+class _MetricsRow extends StatelessWidget {
+  final List<Household> households;
+  final VoidCallback onAddHousehold;
+
+  const _MetricsRow({required this.households, required this.onAddHousehold});
+
+  @override
+  Widget build(BuildContext context) {
+    final total = households.length;
+    final withMeter = households
+        .where((h) => (h.meterNumber ?? '').trim().isNotEmpty)
+        .length;
+    final tone = LandingColors.textSecondary;
+
     return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Icon(icon, size: 18, color: LandingColors.textSecondary),
-        const SizedBox(width: 10),
-        Text(
-          label,
-          style: TextStyle(color: LandingColors.textPrimary, fontSize: 14),
+        Expanded(
+          child: AppMetricCard(
+            icon: Icons.home_work_rounded,
+            accent: AppAccent.blue,
+            label: 'Households',
+            value: '$total',
+            trend: 'Registered to your account',
+            trendColor: tone,
+          ),
+        ),
+        const SizedBox(width: 16),
+        Expanded(
+          child: AppMetricCard(
+            icon: Icons.speed_rounded,
+            accent: AppAccent.green,
+            label: 'Meter numbers',
+            value: '$withMeter / $total',
+            trend: 'Households with a meter number',
+            trendColor: tone,
+          ),
+        ),
+        const SizedBox(width: 16),
+        Expanded(
+          child: AppMetricCard(
+            icon: Icons.add_rounded,
+            accent: AppAccent.orange,
+            label: 'Quick action',
+            value: 'Add Household',
+            trend: 'Register another household',
+            trendColor: tone,
+            trailing: Container(
+              width: 34,
+              height: 34,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: LandingColors.surface,
+              ),
+              child: Icon(
+                Icons.arrow_forward_rounded,
+                size: 16,
+                color: LandingColors.orange,
+              ),
+            ),
+            onTap: onAddHousehold,
+          ),
         ),
       ],
     );
   }
 }
 
-/// Page title, short description and the Add Household button.
-/// Side by side on wide screens; stacked on narrow screens.
-class _DashboardHeader extends StatelessWidget {
-  final VoidCallback onAddHousehold;
+/// "Your Households" title with a small count badge.
+class _SectionHeader extends StatelessWidget {
+  /// Null while the households are still loading.
+  final int? count;
 
-  const _DashboardHeader({required this.onAddHousehold});
+  const _SectionHeader({required this.count});
 
   @override
   Widget build(BuildContext context) {
-    final compact = MediaQuery.sizeOf(context).width < 640;
-
-    final titleBlock = Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+    return Row(
       children: [
         Text(
-          'My Households',
+          'Your Households',
           style: TextStyle(
             color: LandingColors.textPrimary,
-            fontSize: AppText.pageTitle,
+            fontSize: AppText.sectionTitle,
             fontWeight: FontWeight.w700,
-            letterSpacing: -0.3,
           ),
         ),
-        const SizedBox(height: 6),
-        Text(
-          'Manage the households registered to your account.',
-          style: TextStyle(
-            color: LandingColors.textSecondary,
-            fontSize: 14,
-            height: 1.5,
+        if (count != null) ...[
+          const SizedBox(width: 10),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
+            decoration: BoxDecoration(
+              color: LandingColors.blueTint,
+              borderRadius: BorderRadius.circular(999),
+            ),
+            child: Text(
+              '$count',
+              style: TextStyle(
+                color: LandingColors.primary,
+                fontSize: 12,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
           ),
-        ),
-      ],
-    );
-
-    final addButton = LandingPrimaryButton(
-      label: 'Add Household',
-      large: false,
-      onPressed: onAddHousehold,
-    );
-
-    if (compact) {
-      return Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          titleBlock,
-          const SizedBox(height: 16),
-          SizedBox(width: double.infinity, child: addButton),
         ],
-      );
-    }
-
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.center,
-      children: [
-        Expanded(child: titleBlock),
-        const SizedBox(width: 12),
-        addButton,
       ],
     );
   }
@@ -388,7 +417,6 @@ class _HouseholdSection extends StatelessWidget {
 }
 
 /// Friendly message shown when the user has no households.
-/// Its button uses the same Add Household action as the header button.
 class _EmptyHouseholds extends StatelessWidget {
   final VoidCallback onAddHousehold;
 
@@ -403,18 +431,10 @@ class _EmptyHouseholds extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Container(
-              width: 64,
-              height: 64,
-              decoration: BoxDecoration(
-                color: LandingColors.periwinkleTint,
-                borderRadius: BorderRadius.circular(LandingRadius.card),
-              ),
-              child: Icon(
-                Icons.home_work_outlined,
-                color: LandingColors.primary,
-                size: 32,
-              ),
+            const AppIconBadge(
+              icon: Icons.home_work_outlined,
+              accent: AppAccent.blue,
+              size: 64,
             ),
             const SizedBox(height: 20),
             Text(
@@ -453,8 +473,7 @@ class _EmptyHouseholds extends StatelessWidget {
   }
 }
 
-/// A notice that explains which households are demo data and that added
-/// households are not stored permanently yet.
+/// A notice that explains which households are demo data.
 class _SampleDataNotice extends StatelessWidget {
   const _SampleDataNotice();
 
@@ -503,11 +522,10 @@ class _HouseholdGrid extends StatelessWidget {
         const spacing = 16.0;
         final width = constraints.maxWidth;
 
-        // 3 columns on wide screens, 2 on tablets, 1 on phones.
         final columns = width >= 900 ? 3 : (width >= 600 ? 2 : 1);
 
-        // Share the available width evenly. floorToDouble avoids tiny
-        // rounding errors that could push a card onto the next row.
+        // floorToDouble avoids tiny rounding errors that could push a card
+        // onto the next row.
         final cardWidth = ((width - spacing * (columns - 1)) / columns)
             .floorToDouble();
 

@@ -1,11 +1,11 @@
 import 'package:flutter/material.dart';
 
-import '../landing/landing_widgets.dart' show LandingCard, LandingLogo;
 import '../theme/app_colors.dart'; // only for status colors (error / success)
-import '../theme/app_theme.dart';
+import '../theme/app_effects.dart';
 import '../theme/landing_colors.dart';
 import 'dashboard_screen.dart';
 import '../services/api_service.dart';
+import '../widgets/app_message.dart';
 
 class LoginScreen extends StatefulWidget {
   final int initialTab;
@@ -162,7 +162,10 @@ class _LoginScreenState extends State<LoginScreen>
 
       setState(() => _loading = false);
 
-      _showSnackbar('Login successful!');
+      // Centered success popup. The dashboard opens after it closes.
+      await showSuccessPopup(context, message: 'Login successful!');
+
+      if (!mounted) return;
 
       Navigator.pushReplacement(
         context,
@@ -240,58 +243,31 @@ class _LoginScreenState extends State<LoginScreen>
 
   @override
   Widget build(BuildContext context) {
-    // Small screens get a little less padding so the form still fits nicely.
-    final compact = MediaQuery.sizeOf(context).width < 480;
-
-    // The app-wide theme is the old dark one, so we wrap this screen in the
-    // same light theme the landing page uses.
-    return Theme(
-      data: AppTheme.lightTheme,
-      child: Scaffold(
-        backgroundColor: LandingColors.backgroundSoft,
-        body: SafeArea(
+    // Follows the app-wide light/dark theme provided by MaterialApp.
+    return Scaffold(
+      body: AppBackground(
+        child: SafeArea(
           child: Center(
             child: SingleChildScrollView(
-              padding: EdgeInsets.fromLTRB(
-                compact ? 16 : 24,
-                24,
-                compact ? 16 : 24,
-                32,
-              ),
+              padding: const EdgeInsets.all(32),
               child: ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 420),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    _buildLogoLink(),
-                    const SizedBox(height: 24),
-                    LandingCard(
-                      padding: EdgeInsets.all(compact ? 20 : 28),
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: [
-                          _buildHeader(),
-                          const SizedBox(height: 24),
-                          _buildTabBar(),
-                          const SizedBox(height: 24),
-                          AnimatedSwitcher(
-                            duration: const Duration(milliseconds: 220),
-                            switchInCurve: Curves.easeOut,
-                            switchOutCurve: Curves.easeIn,
-                            transitionBuilder: (child, anim) =>
-                                FadeTransition(opacity: anim, child: child),
-                            child: _tab.index == 0
-                                ? _buildSignInForm()
-                                : _buildRegisterForm(),
-                          ),
-                        ],
-                      ),
+                constraints: const BoxConstraints(maxWidth: 1080),
+                child: Container(
+                  height: 660,
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(28),
+                    border: Border.all(color: LandingColors.border),
+                    boxShadow: AppEffects.raised,
+                  ),
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(28),
+                    child: Row(
+                      children: [
+                        Expanded(flex: 5, child: _buildBrandPanel()),
+                        Expanded(flex: 6, child: _buildFormPanel()),
+                      ],
                     ),
-                    const SizedBox(height: 16),
-                    _buildBackLink(),
-                  ],
+                  ),
                 ),
               ),
             ),
@@ -301,33 +277,209 @@ class _LoginScreenState extends State<LoginScreen>
     );
   }
 
-  // The logo above the card. Clicking it goes back to the landing page.
-  Widget _buildLogoLink() {
-    return Center(
-      child: Tooltip(
-        message: 'Back to home',
-        child: InkWell(
-          borderRadius: BorderRadius.circular(LandingRadius.control),
-          onTap: () => Navigator.maybePop(context),
-          child: const Padding(
-            padding: EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-            child: LandingLogo(),
+  // ── Left brand panel ──────────────────────────────────────────────────────
+
+  Widget _buildBrandPanel() {
+    final signIn = _tab.index == 0;
+    return Container(
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: [
+            LandingColors.primary,
+            Color.lerp(LandingColors.primary, LandingColors.purple, 0.4)!,
+          ],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+      ),
+      child: Stack(
+        children: [
+          Positioned(top: -90, right: -70, child: _ring(280, 0.10)),
+          Positioned(bottom: -130, left: -90, child: _ring(320, 0.08)),
+          Padding(
+            padding: const EdgeInsets.all(40),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _buildBrandLogo(),
+                const Spacer(),
+                Text(
+                  signIn
+                      ? 'Welcome to your energy dashboard'
+                      : 'Start tracking your household electricity',
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 30,
+                    fontWeight: FontWeight.w800,
+                    height: 1.2,
+                    letterSpacing: -0.5,
+                  ),
+                ),
+                const SizedBox(height: 14),
+                Text(
+                  signIn
+                      ? 'Sign in to monitor consumption, review your records, and view forecasts.'
+                      : 'Create an account to record meter readings and explore forecasts and estimated bills.',
+                  style: TextStyle(
+                    color: Colors.white.withValues(alpha: 0.88),
+                    fontSize: 15,
+                    height: 1.6,
+                  ),
+                ),
+                const SizedBox(height: 28),
+                _brandPoint(Icons.edit_note_rounded, 'Record meter readings'),
+                const SizedBox(height: 14),
+                _brandPoint(Icons.show_chart_rounded, 'Monitor usage history'),
+                const SizedBox(height: 14),
+                _brandPoint(
+                  Icons.auto_graph_rounded,
+                  'Forecast consumption and estimate bills',
+                ),
+                const Spacer(),
+                _buildBackLink(),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _ring(double size, double alpha) => IgnorePointer(
+    child: Container(
+      width: size,
+      height: size,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        color: Colors.white.withValues(alpha: alpha),
+        border: Border.all(
+          color: Colors.white.withValues(alpha: alpha * 2),
+          width: 2,
+        ),
+      ),
+    ),
+  );
+
+  // The logo on the brand panel. Clicking it goes back to the landing page.
+  Widget _buildBrandLogo() {
+    return Tooltip(
+      message: 'Back to home',
+      child: InkWell(
+        borderRadius: BorderRadius.circular(LandingRadius.control),
+        onTap: () => Navigator.maybePop(context),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 4),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 38,
+                height: 38,
+                decoration: BoxDecoration(
+                  color: Colors.white.withValues(alpha: 0.2),
+                  borderRadius: BorderRadius.circular(LandingRadius.control),
+                  border: Border.all(
+                    color: Colors.white.withValues(alpha: 0.35),
+                  ),
+                ),
+                child: const Icon(
+                  Icons.bolt_rounded,
+                  color: Colors.white,
+                  size: 22,
+                ),
+              ),
+              const SizedBox(width: 10),
+              const Text(
+                'E-FORECAST',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 17,
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: 0.6,
+                ),
+              ),
+            ],
           ),
         ),
       ),
     );
   }
 
-  // Small text link under the card.
+  Widget _brandPoint(IconData icon, String text) {
+    return Row(
+      children: [
+        Container(
+          width: 32,
+          height: 32,
+          decoration: BoxDecoration(
+            color: Colors.white.withValues(alpha: 0.18),
+            borderRadius: BorderRadius.circular(10),
+          ),
+          child: Icon(icon, color: Colors.white, size: 18),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Text(
+            text,
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 14,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  // Link back to the landing page, at the bottom of the brand panel.
   Widget _buildBackLink() {
-    return Center(
+    return Align(
+      alignment: Alignment.centerLeft,
       child: TextButton.icon(
         onPressed: () => Navigator.maybePop(context),
         icon: const Icon(Icons.arrow_back_rounded, size: 16),
         label: const Text('Back to home'),
         style: TextButton.styleFrom(
-          foregroundColor: LandingColors.textSecondary,
-          textStyle: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500),
+          foregroundColor: Colors.white.withValues(alpha: 0.92),
+          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
+          textStyle: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+        ),
+      ),
+    );
+  }
+
+  // ── Right form panel ──────────────────────────────────────────────────────
+
+  Widget _buildFormPanel() {
+    return Container(
+      color: LandingColors.surface,
+      child: Center(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.symmetric(horizontal: 48, vertical: 32),
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 400),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                _buildHeader(),
+                const SizedBox(height: 24),
+                _buildTabBar(),
+                const SizedBox(height: 24),
+                AnimatedSwitcher(
+                  duration: const Duration(milliseconds: 220),
+                  switchInCurve: Curves.easeOut,
+                  switchOutCurve: Curves.easeIn,
+                  transitionBuilder: (child, anim) =>
+                      FadeTransition(opacity: anim, child: child),
+                  child: _tab.index == 0
+                      ? _buildSignInForm()
+                      : _buildRegisterForm(),
+                ),
+              ],
+            ),
+          ),
         ),
       ),
     );
@@ -339,7 +491,7 @@ class _LoginScreenState extends State<LoginScreen>
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
-          signIn ? 'Welcome back' : 'Create an account',
+          signIn ? 'Welcome' : 'Create an account',
           style: TextStyle(
             color: LandingColors.textPrimary,
             fontSize: 24,
@@ -415,27 +567,8 @@ class _LoginScreenState extends State<LoginScreen>
           obscure: _signInObscure,
           onToggle: () => setState(() => _signInObscure = !_signInObscure),
         ),
-        const SizedBox(height: 6),
-        Align(
-          alignment: Alignment.centerRight,
-          child: TextButton(
-            onPressed: () {},
-            style: TextButton.styleFrom(
-              padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
-              foregroundColor: LandingColors.primary,
-            ),
-            child: const Text(
-              'Forgot password?',
-              style: TextStyle(fontSize: 12, fontWeight: FontWeight.w500),
-            ),
-          ),
-        ),
-        const SizedBox(height: 8),
-        _buildSubmitButton(label: 'Sign In', onPressed: _submitSignIn),
         const SizedBox(height: 24),
-        _buildDivider(),
-        const SizedBox(height: 20),
-        _buildSocialRow(),
+        _buildSubmitButton(label: 'Sign In', onPressed: _submitSignIn),
         const SizedBox(height: 20),
         _buildSwitchPrompt(
           message: "Don't have an account?  ",
@@ -646,52 +779,6 @@ class _LoginScreenState extends State<LoginScreen>
     );
   }
 
-  Widget _buildDivider() {
-    return Row(
-      children: [
-        Expanded(child: Divider(color: LandingColors.border, thickness: 1)),
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 14),
-          child: Text(
-            'or continue with',
-            style: TextStyle(color: LandingColors.textSecondary, fontSize: 12),
-          ),
-        ),
-        Expanded(child: Divider(color: LandingColors.border, thickness: 1)),
-      ],
-    );
-  }
-
-  Widget _buildSocialRow() {
-    return Row(
-      children: [
-        Expanded(child: _socialButton('Google', Icons.g_mobiledata_rounded)),
-        const SizedBox(width: 12),
-        Expanded(child: _socialButton('GitHub', Icons.code_rounded)),
-      ],
-    );
-  }
-
-  Widget _socialButton(String label, IconData icon) {
-    return OutlinedButton.icon(
-      onPressed: () {},
-      style: OutlinedButton.styleFrom(
-        padding: const EdgeInsets.symmetric(vertical: 13),
-        side: BorderSide(color: LandingColors.border, width: 1.5),
-        backgroundColor: LandingColors.background,
-        foregroundColor: LandingColors.textPrimary,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(LandingRadius.control),
-        ),
-      ),
-      icon: Icon(icon, size: 20, color: LandingColors.textSecondary),
-      label: Text(
-        label,
-        style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500),
-      ),
-    );
-  }
-
   Widget _buildSwitchPrompt({
     required String message,
     required String action,
@@ -704,14 +791,17 @@ class _LoginScreenState extends State<LoginScreen>
           message,
           style: TextStyle(color: LandingColors.textSecondary, fontSize: 13),
         ),
-        GestureDetector(
-          onTap: onTap,
-          child: Text(
-            action,
-            style: TextStyle(
-              color: LandingColors.primary,
-              fontSize: 13,
-              fontWeight: FontWeight.w600,
+        MouseRegion(
+          cursor: SystemMouseCursors.click,
+          child: GestureDetector(
+            onTap: onTap,
+            child: Text(
+              action,
+              style: TextStyle(
+                color: LandingColors.primary,
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+              ),
             ),
           ),
         ),
