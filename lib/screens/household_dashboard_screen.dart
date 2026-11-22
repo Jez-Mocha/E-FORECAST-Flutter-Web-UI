@@ -96,7 +96,6 @@ class HouseholdDashboardScreen extends StatelessWidget {
                         const SizedBox(height: 20),
                         _DetailsCard(household: household),
                         const SizedBox(height: 20),
-                        _PreviewNotice(isSample: household.isSample),
                         const SizedBox(height: 24),
                         Text(
                           'Household tools',
@@ -230,6 +229,7 @@ class _DetailsCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final compact = MediaQuery.sizeOf(context).width < 600;
     final occupants = household.occupants;
+    final meterNumber = household.meterNumber?.trim();
 
     return SizedBox(
       width: double.infinity,
@@ -251,6 +251,13 @@ class _DetailsCard extends StatelessWidget {
               icon: Icons.people_outline_rounded,
               label: 'Occupants',
               value: occupants == 1 ? '1 occupant' : '$occupants occupants',
+            ),
+            _DetailRow(
+              icon: Icons.speed_rounded,
+              label: 'Meter Number',
+              value: meterNumber != null && meterNumber.isNotEmpty
+                  ? meterNumber
+                  : 'Not provided',
             ),
             Divider(color: LandingColors.border, height: 1),
             _DetailRow(
@@ -329,44 +336,6 @@ class _DetailRow extends StatelessWidget {
                   ),
                 ),
               ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-/// Tells the user this screen is a preview and the tools are not built yet.
-class _PreviewNotice extends StatelessWidget {
-  final bool isSample;
-
-  const _PreviewNotice({required this.isSample});
-
-  @override
-  Widget build(BuildContext context) {
-    final extra = isSample
-        ? ' This is a sample household, so its values are placeholders.'
-        : '';
-
-    return LandingCard(
-      color: LandingColors.periwinkleTint,
-      padding: const EdgeInsets.all(16),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const SampleDataChip(label: 'Preview'),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Text(
-              'This screen is a UI preview. The tools below are not built '
-              'yet, so this household has no readings, usage history or '
-              'forecast.$extra',
-              style: TextStyle(
-                color: LandingColors.textSecondary,
-                fontSize: 13,
-                height: 1.5,
-              ),
             ),
           ),
         ],

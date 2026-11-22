@@ -162,7 +162,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             // Left: logo + animated Electricity Rates.
-            const DashboardSidebar(),
+            DashboardSidebar(onAddHousehold: _addHousehold),
 
             // Right dashboard content.
             Expanded(

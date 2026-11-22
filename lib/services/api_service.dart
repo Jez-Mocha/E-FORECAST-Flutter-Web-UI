@@ -151,6 +151,56 @@ class ApiService {
     };
   }
 
+   // ── Admin API Methods ─────────────────────────
+
+   // Shared method for retrieving admin lists.
+   static Future<List<Map<String, dynamic>>> _getAdminList(
+    String endpoint,
+    String responseKey,
+  ) async {
+    final response = await http
+        .get(
+          Uri.parse('$baseUrl$endpoint'),
+          headers: await _authHeaders(),
+        )
+        .timeout(const Duration(seconds: 15));
+
+    final result = _handleResponse(response);
+    final items = result[responseKey];
+
+    if (items is! List) {
+      throw ApiException(
+        'Invalid $responseKey response from server.',
+      );
+    }
+
+    return items
+        .whereType<Map>()
+        .map((item) => Map<String, dynamic>.from(item))
+        .toList();
+  }
+
+  // Retrieve all registered users.
+  static Future<List<Map<String, dynamic>>> getAdminUsers() {
+    return _getAdminList('/api/admin/users', 'users');
+  }
+
+  // Retrieve all registered households.
+  static Future<List<Map<String, dynamic>>> getAdminHouseholds() {
+    return _getAdminList('/api/admin/households', 'households');
+  }
+
+  // Retrieve all generated forecasts.
+  static Future<List<Map<String, dynamic>>> getAdminForecasts() {
+    return _getAdminList('/api/admin/forecasts', 'forecasts');
+  }
+
+  // Retrieve all electricity consumption records.
+  static Future<List<Map<String, dynamic>>> getAdminConsumption() {
+    return _getAdminList('/api/admin/consumption', 'records');
+  }
+
+
   static Future<List<Map<String, dynamic>>> getHouseholds() async {
     final response = await http
         .get(
@@ -200,40 +250,31 @@ class ApiService {
     return _handleResponse(response);
   }
 
-  static Future<double?> getLastMeterReading(int householdId) async {
-    final response = await http
-        .get(
-          Uri.parse('$baseUrl/api/consumption/history').replace(
-            queryParameters: {'household_id': '$householdId'},
-          ),
-          headers: await _authHeaders(),
-        )
-        .timeout(const Duration(seconds: 15));
+  
+static Future<Map<String, dynamic>?> getLastMeterReading(
+  int householdId,
+) async {
+  final response = await http
+      .get(
+        Uri.parse('$baseUrl/api/consumption/latest-meter').replace(
+          queryParameters: {'household_id': '$householdId'},
+        ),
+        headers: await _authHeaders(),
+      )
+      .timeout(const Duration(seconds: 15));
 
-    final decoded = _handleResponse(response);
-    final records = decoded['records'];
+  final decoded = _handleResponse(response);
 
-    if (records is! List) return null;
-
-    double? latestReading;
-    DateTime? latestDate;
-
-    for (final item in records) {
-      if (item is! Map) continue;
-
-      final date = DateTime.tryParse('${item['date'] ?? ''}');
-      final reading = _toDouble(item['meter_current']);
-
-      if (date == null || reading == null) continue;
-
-      if (latestDate == null || date.isAfter(latestDate)) {
-        latestDate = date;
-        latestReading = reading;
-      }
-    }
-
-    return latestReading;
+  if (decoded['has_previous_record'] != true) {
+    return null;
   }
+
+  return {
+    'meter_reading': _toDouble(decoded['last_meter_reading']),
+    'reading_date': decoded['last_consumption_date'],
+  };
+}
+
 
   static Future<List<ConsumptionRecord>> getConsumptionHistory(
     int householdId, {
@@ -297,6 +338,7 @@ class ApiService {
   static Future<Map<String, dynamic>> recordConsumption({
     required int householdId,
     required DateTime consumptionDate,
+    DateTime? previousReadingDate,
     required double meterPrevious,
     required double meterCurrent,
   }) async {
@@ -307,6 +349,9 @@ class ApiService {
           body: jsonEncode({
             'household_id': householdId,
             'consumption_date': _formatDate(consumptionDate),
+            'previous_reading_date': previousReadingDate != null
+                ? _formatDate(previousReadingDate)
+                : null,
             'meter_previous': meterPrevious,
             'meter_current': meterCurrent,
           }),
@@ -315,6 +360,29 @@ class ApiService {
 
     return _handleResponse(response);
   }
+
+  static Future<Map<String, dynamic>> recordMonthlyConsumption({
+    required int householdId,
+    required DateTime billingMonth,
+    required double consumptionKwh,
+  }) async {
+    final response = await http
+        .post(
+          Uri.parse('$baseUrl/api/monthly-consumption'),
+          headers: await _authHeaders(),
+          body: jsonEncode({
+            'household_id': householdId,
+            'billing_month': _formatDate(
+              DateTime(billingMonth.year, billingMonth.month, 1),
+            ),
+            'consumption_kwh': consumptionKwh,
+          }),
+        )
+        .timeout(const Duration(seconds: 15));
+
+      return _handleResponse(response);
+  }
+
 
   static Future<ForecastResult> generateForecast({
     required int householdId,

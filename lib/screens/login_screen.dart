@@ -7,6 +7,7 @@ import '../theme/app_colors.dart';
 import '../theme/app_theme.dart';
 import '../theme/landing_colors.dart';
 import 'dashboard_screen.dart';
+import 'admin_dashboard_screen.dart';
 
 class LoginScreen extends StatefulWidget {
   final int initialTab;
@@ -174,22 +175,34 @@ class _LoginScreenState extends State<LoginScreen>
 
     try {
       // Authenticate through the FastAPI backend.
-      await ApiService.login(
+      final result = await ApiService.login(
         usernameOrEmail: email,
         password: password,
       );
+
+      final role = result['role']?.toString();
+
+      if (role != 'ADMIN' && role != 'HOUSEHOLD_USER') {
+        await ApiService.logout();
+        throw Exception('Unknown account role. Please contact the administrator.');
+      }
 
       // Load the user's saved theme settings.
       await ThemeController.loadForCurrentUser();
 
       if (!mounted) return;
 
+      final Widget destination = role == 'ADMIN'
+          ? const AdminDashboardScreen()
+          : const DashboardScreen();
+
       Navigator.pushReplacement(
         context,
         MaterialPageRoute(
-          builder: (_) => const DashboardScreen(),
+          builder: (_) => destination,
         ),
       );
+    
     } catch (e) {
       if (!mounted) return;
 

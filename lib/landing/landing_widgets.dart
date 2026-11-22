@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../screens/login_screen.dart';
+import '../theme/app_effects.dart';
 import '../theme/landing_colors.dart';
 
 /// Opens the existing [LoginScreen]. Tab 0 = Sign In, tab 1 = Register.
@@ -132,6 +133,7 @@ class LandingSectionHeader extends StatelessWidget {
 }
 
 /// White card with a thin border. Flat by default (no shadow).
+/// Pass `shadow: false` for a flat card (for example inside another card).
 class LandingCard extends StatelessWidget {
   final Widget child;
   final EdgeInsetsGeometry padding;
@@ -156,7 +158,7 @@ class LandingCard extends StatelessWidget {
         color: color ?? LandingColors.background,
         borderRadius: BorderRadius.circular(radius),
         border: Border.all(color: LandingColors.border),
-        boxShadow: shadow ? LandingColors.softShadow : null,
+        boxShadow: shadow ? AppEffects.raised : null,
       ),
       child: child,
     );

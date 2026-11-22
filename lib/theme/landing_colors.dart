@@ -5,11 +5,11 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../main.dart'; // Import to use the global themeNotifier
 import '../services/api_service.dart';
 
-/// Corner sizes used across the landing page and login screen.
+/// Corner sizes used across the app. Rounder than before (new design).
 class LandingRadius {
   LandingRadius._();
-  static const double card = 12;
-  static const double control = 8;
+  static const double card = 18;
+  static const double control = 12;
 }
 
 /// Holds light/dark mode and rebuilds the whole app when it changes.
@@ -86,74 +86,239 @@ class ThemeController {
   static void resetToLight() => setMode(ThemeMode.light);
 }
 
-/// Palette for the landing page and login screen. Every color switches
-/// between light and dark automatically.
+/// One complete set of colors for ONE mode (light or dark).
+///
+/// Light and dark are written out separately below, so each one can be
+/// tuned on its own. [AppTheme] uses these two sets directly to build the
+/// Flutter themes, and [LandingColors] picks the right set for the mode
+/// that is currently on screen.
+class AppPalette {
+  const AppPalette({
+    required this.brightness,
+    required this.primary,
+    required this.secondary,
+    required this.purple,
+    required this.orange,
+    required this.background,
+    required this.backgroundSoft,
+    required this.surface,
+    required this.gradientTop,
+    required this.gradientBottom,
+    required this.glowBlue,
+    required this.glowGreen,
+    required this.blueTint,
+    required this.greenTint,
+    required this.purpleTint,
+    required this.orangeTint,
+    required this.amberTint,
+    required this.amberBorder,
+    required this.amberText,
+    required this.textPrimary,
+    required this.textSecondary,
+    required this.border,
+    required this.danger,
+    required this.shadowLight,
+    required this.shadowDark,
+    required this.glassFill,
+    required this.glassBorder,
+  });
+
+  final Brightness brightness;
+
+  // Brand and accents
+  final Color primary; // blue
+  final Color secondary; // green (energy)
+  final Color purple; // occasional metric accent
+  final Color orange; // occasional metric accent
+
+  // Surfaces
+  final Color background; // the page itself
+  final Color backgroundSoft; // pressed-in areas such as text fields
+  final Color surface; // raised cards
+
+  // Page background gradient and ambient glows
+  final Color gradientTop;
+  final Color gradientBottom;
+  final Color glowBlue;
+  final Color glowGreen;
+
+  // Soft tints for icon badges, metric cards and highlights
+  final Color blueTint;
+  final Color greenTint;
+  final Color purpleTint;
+  final Color orangeTint;
+  final Color amberTint; // sample-data and warning chips
+  final Color amberBorder;
+  final Color amberText;
+
+  // Text, lines, status
+  final Color textPrimary;
+  final Color textSecondary;
+  final Color border;
+  final Color danger;
+
+  // Soft raised look (neumorphism): one light and one dark shadow
+  final Color shadowLight;
+  final Color shadowDark;
+
+  // Translucent panels (glass)
+  final Color glassFill;
+  final Color glassBorder;
+
+  /// Text and icons that sit on top of the primary (blue) color.
+  Color get onPrimary => Colors.white;
+
+  /// Light mode: soft sky-blue page, white glass cards, navy text.
+  static const AppPalette light = AppPalette(
+    brightness: Brightness.light,
+    primary: Color(0xFF2563EB),
+    secondary: Color(0xFF059669),
+    purple: Color(0xFF7C5CFF),
+    orange: Color(0xFFF97316),
+    background: Color(0xFFE6EFFA),
+    backgroundSoft: Color(0xFFDCE8F7),
+    surface: Color(0xFFF8FBFF),
+    gradientTop: Color(0xFFD9E9FF),
+    gradientBottom: Color(0xFFF1F7FF),
+    glowBlue: Color(0x4D60A5FA),
+    glowGreen: Color(0x3334D399),
+    blueTint: Color(0xFFDDEAFF),
+    greenTint: Color(0xFFD8F3E6),
+    purpleTint: Color(0xFFE8E1FF),
+    orangeTint: Color(0xFFFFE6D2),
+    amberTint: Color(0xFFFBEFD5),
+    amberBorder: Color(0xFFE8CF8E),
+    amberText: Color(0xFF86570A),
+    textPrimary: Color(0xFF0F1F3D),
+    textSecondary: Color(0xFF52627D),
+    border: Color(0xFFD3E1F3),
+    danger: Color(0xFFDC2626),
+    shadowLight: Color(0xE6FFFFFF),
+    shadowDark: Color(0x4D7B9AC4),
+    glassFill: Color(0xA6FFFFFF),
+    glassBorder: Color(0xCCFFFFFF),
+  );
+
+  /// Dark mode: deep navy page, dark glass cards, brighter accents.
+  static const AppPalette dark = AppPalette(
+    brightness: Brightness.dark,
+    primary: Color(0xFF4C8DFF),
+    secondary: Color(0xFF34D399),
+    purple: Color(0xFFA78BFA),
+    orange: Color(0xFFFB923C),
+    background: Color(0xFF0B1320),
+    backgroundSoft: Color(0xFF08101A),
+    surface: Color(0xFF142033),
+    gradientTop: Color(0xFF0E1A30),
+    gradientBottom: Color(0xFF0A1220),
+    glowBlue: Color(0x334C8DFF),
+    glowGreen: Color(0x2234D399),
+    blueTint: Color(0xFF15294D),
+    greenTint: Color(0xFF10342A),
+    purpleTint: Color(0xFF241F4D),
+    orangeTint: Color(0xFF3A2414),
+    amberTint: Color(0xFF33280F),
+    amberBorder: Color(0xFF5C4718),
+    amberText: Color(0xFFF2C46B),
+    textPrimary: Color(0xFFE8EFFA),
+    textSecondary: Color(0xFF9DB0C9),
+    border: Color(0xFF22344D),
+    danger: Color(0xFFF87171),
+    shadowLight: Color(0x08FFFFFF),
+    shadowDark: Color(0xA6000000),
+    glassFill: Color(0x99142033),
+    glassBorder: Color(0x1FFFFFFF),
+  );
+}
+
+/// Palette used by the screens and widgets. Every color switches between
+/// light and dark automatically, using [AppPalette] above.
+///
+/// The old names (periwinkleTint, lavenderTint, pinkTint, ...) still work so
+/// no screen breaks. They point to the blue / green / amber tints.
 class LandingColors {
   LandingColors._();
 
-  static bool get _d => ThemeController.isDark;
+  static AppPalette get _p =>
+      ThemeController.isDark ? AppPalette.dark : AppPalette.light;
 
-  // Brand
-  static Color get primary =>
-      _d ? const Color(0xFF7479FF) : const Color(0xFF6367FF);
-  static Color get secondary =>
-      _d ? const Color(0xFF8E9CFF) : const Color(0xFF8494FF);
+  // Brand and accents
+  static Color get primary => _p.primary;
+  static Color get secondary => _p.secondary;
+  static Color get purple => _p.purple;
+  static Color get orange => _p.orange;
+  static Color get onPrimary => _p.onPrimary;
 
-  // Backgrounds
-  static Color get background =>
-      _d ? const Color(0xFF0E0F1E) : const Color(0xFFFFFFFF);
-  static Color get backgroundSoft =>
-      _d ? const Color(0xFF15162B) : const Color(0xFFF8F7FF);
+  // Backgrounds and surfaces
+  static Color get background => _p.background;
+  static Color get backgroundSoft => _p.backgroundSoft;
+  static Color get surface => _p.surface;
 
-  // Pastel tints
-  static Color get periwinkleTint =>
-      _d ? const Color(0xFF1E2145) : const Color(0xFFEEF0FF);
-  static Color get lavenderTint =>
-      _d ? const Color(0xFF241F4A) : const Color(0xFFF1EDFF);
-  static Color get pinkTint =>
-      _d ? const Color(0xFF2E1B30) : const Color(0xFFFFEEF5);
-  static Color get pinkBorder =>
-      _d ? const Color(0xFF5C2E4C) : const Color(0xFFF8D3E4);
-  static Color get pinkText =>
-      _d ? const Color(0xFFF49AC6) : const Color(0xFFB4477A);
+  // Page gradient and glows
+  static Color get gradientTop => _p.gradientTop;
+  static Color get gradientBottom => _p.gradientBottom;
+  static Color get glowBlue => _p.glowBlue;
+  static Color get glowGreen => _p.glowGreen;
+
+  // Tints (new names)
+  static Color get blueTint => _p.blueTint;
+  static Color get greenTint => _p.greenTint;
+  static Color get purpleTint => _p.purpleTint;
+  static Color get orangeTint => _p.orangeTint;
+  static Color get amberTint => _p.amberTint;
+  static Color get amberBorder => _p.amberBorder;
+  static Color get amberText => _p.amberText;
+
+  // Tints (old names, kept so existing screens keep working)
+  static Color get periwinkleTint => _p.blueTint;
+  static Color get lavenderTint => _p.greenTint;
+  static Color get pinkTint => _p.amberTint;
+  static Color get pinkBorder => _p.amberBorder;
+  static Color get pinkText => _p.amberText;
 
   // Text
-  static Color get textPrimary =>
-      _d ? const Color(0xFFF1F1FF) : const Color(0xFF202044);
-  static Color get textSecondary =>
-      _d ? const Color(0xFFA3A5C7) : const Color(0xFF686881);
+  static Color get textPrimary => _p.textPrimary;
+  static Color get textSecondary => _p.textSecondary;
 
-  // Borders
-  static Color get border =>
-      _d ? const Color(0xFF2B2D52) : const Color(0xFFEAE7FF);
+  // Lines and status
+  static Color get border => _p.border;
+  static Color get danger => _p.danger;
+
+  // Glass and soft-shadow colors (used by app_effects.dart)
+  static Color get shadowLight => _p.shadowLight;
+  static Color get shadowDark => _p.shadowDark;
+  static Color get glassFill => _p.glassFill;
+  static Color get glassBorder => _p.glassBorder;
 
   // Gradients
   static LinearGradient get primaryGradient => LinearGradient(
+    colors: [primary, Color.lerp(primary, Colors.white, 0.28)!],
+    begin: Alignment.topLeft,
+    end: Alignment.bottomRight,
+  );
+
+  /// Blue to green, for energy-themed highlights.
+  static LinearGradient get energyGradient => LinearGradient(
     colors: [primary, secondary],
     begin: Alignment.topLeft,
     end: Alignment.bottomRight,
   );
 
   static LinearGradient get pageGradient => LinearGradient(
-    colors: [background, backgroundSoft],
-    begin: Alignment.topCenter,
-    end: Alignment.bottomCenter,
-  );
-
-  static LinearGradient get ctaGradient => LinearGradient(
-    colors: [periwinkleTint, pinkTint],
+    colors: [gradientTop, gradientBottom],
     begin: Alignment.topLeft,
     end: Alignment.bottomRight,
   );
 
-  // Shadows
+  static LinearGradient get ctaGradient => LinearGradient(
+    colors: [blueTint, greenTint],
+    begin: Alignment.topLeft,
+    end: Alignment.bottomRight,
+  );
+
+  // Shadows. The old name softShadow gives the small raised look.
   static List<BoxShadow> get softShadow => [
-    BoxShadow(
-      color: _d
-          ? Colors.black.withValues(alpha: 0.35)
-          : primary.withValues(alpha: 0.06),
-      blurRadius: 16,
-      offset: const Offset(0, 4),
-    ),
+    BoxShadow(color: shadowDark, blurRadius: 12, offset: const Offset(3, 3)),
+    BoxShadow(color: shadowLight, blurRadius: 12, offset: const Offset(-3, -3)),
   ];
 }
