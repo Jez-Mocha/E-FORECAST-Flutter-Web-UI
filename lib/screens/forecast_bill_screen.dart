@@ -83,9 +83,9 @@ class _ForecastBillScreenState extends State<ForecastBillScreen> {
       final today = DateTime.now();
       final cycle = BillingCycle.current(today, billingDay);
       final rate = await ApiService.getCurrentElectricityRate(id);
+      // A legacy reading may need a matching meter baseline before the cycle.
       final readings = await ApiService.getConsumptionHistory(
         id,
-        startDate: cycle.start,
         endDate: today,
       );
       return (

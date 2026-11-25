@@ -58,7 +58,6 @@ void main() {
           case '/api/consumption/history':
             expect(request.url.queryParameters, {
               'household_id': '7',
-              'start_date': iso(today),
               'end_date': iso(today),
             });
             return jsonResponse({
@@ -100,6 +99,52 @@ void main() {
         expect(find.text('₱1,150.00'), findsOneWidget);
         expect(find.text('December 2026'), findsOneWidget);
         expect(find.text('₱50.00'), findsOneWidget);
+        ApiService.logout();
+      }, () => client);
+    },
+  );
+
+  testWidgets(
+    'legacy interval uses a matching meter reading before the cycle boundary',
+    (tester) async {
+      final now = DateTime.now();
+      final today = DateTime(now.year, now.month, now.day);
+      final preceding = DateTime(now.year, now.month, now.day - 2);
+      final client = MockClient((request) async {
+        switch (request.url.path) {
+          case '/api/auth/login':
+            return jsonResponse({'token': testToken(role), 'role': role}, 200);
+          case '/api/electricity-rates/current':
+            return jsonResponse({
+              'rate_id': 2,
+              'provider': 'ANECO',
+              'rate_per_kwh': 10,
+              'effective_date': iso(today),
+            }, 200);
+          case '/api/consumption/history':
+            final startDate = request.url.queryParameters['start_date'];
+            return jsonResponse({
+              'records': [
+                if (startDate == null ||
+                    iso(preceding).compareTo(startDate) >= 0)
+                  {'date': iso(preceding), 'kwh': 8, 'meter_current': 100},
+                {
+                  'date': iso(today),
+                  'kwh': 12,
+                  'meter_previous': 100,
+                  'meter_current': 112,
+                },
+              ],
+            }, 200);
+          default:
+            fail('Unexpected request ${request.url}');
+        }
+      });
+      await http.runWithClient(() async {
+        await openForecast(tester, billingDay: today.day);
+        expect(find.text('Current Estimated Bill'), findsOneWidget);
+        expect(find.text('₱60.00'), findsOneWidget);
+        expect(find.text('6.00 kWh recorded this cycle'), findsOneWidget);
         ApiService.logout();
       }, () => client);
     },
