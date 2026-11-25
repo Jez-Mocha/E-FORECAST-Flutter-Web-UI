@@ -3,6 +3,7 @@
 class ConsumptionRecord {
   /// The day the reading was recorded.
   final DateTime date;
+  final DateTime? previousReadingDate;
 
   /// kWh used, as calculated by the backend (current - previous).
   final double kwh;
@@ -15,6 +16,7 @@ class ConsumptionRecord {
   const ConsumptionRecord({
     required this.date,
     required this.kwh,
+    this.previousReadingDate,
     this.meterPrevious,
     this.meterCurrent,
   });
@@ -39,6 +41,9 @@ class ConsumptionRecord {
 
     return ConsumptionRecord(
       date: DateTime(date.year, date.month, date.day),
+      previousReadingDate: DateTime.tryParse(
+        '${json['previous_reading_date']}',
+      ),
       kwh: kwh,
       meterPrevious: previous,
       meterCurrent: current,

@@ -6,8 +6,8 @@ class Household {
   final String city;
   final int occupants;
   final String provider;
-  final double ratePerKwh;
-  final int billingCycleDay;
+  final double? ratePerKwh;
+  final int? billingCycleDay;
   final String? meterNumber;
   final bool isSample;
 
@@ -25,7 +25,7 @@ class Household {
   });
 
   /// One-line address for display.
-  String get address => '$street, $city';
+  String get address => city.isEmpty ? street : '$street, $city';
 
   /// Creates a Household from the backend response.
   factory Household.fromJson(Map<String, dynamic> json) {
@@ -37,10 +37,10 @@ class Household {
       name: (json['household_name'] ?? '').toString(),
       street: parts.first.trim(),
       city: parts.length > 1 ? parts.sublist(1).join(',').trim() : '',
-      occupants: 0,
-      provider: '',
-      ratePerKwh: 0.0,
-      billingCycleDay: 1,
+      occupants: int.tryParse('${json['occupants']}') ?? 0,
+      provider: (json['electricity_provider'] as String?)?.trim() ?? '',
+      ratePerKwh: double.tryParse('${json['rate_per_kwh']}'),
+      billingCycleDay: int.tryParse('${json['billing_cycle_day']}'),
       meterNumber: json['meter_number']?.toString(),
       isSample: false,
     );

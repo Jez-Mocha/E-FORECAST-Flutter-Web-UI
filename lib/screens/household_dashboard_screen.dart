@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 
 import '../landing/landing_widgets.dart' show SampleDataChip;
+import '../models/billing_data.dart';
 import '../models/household.dart';
+import '../services/api_service.dart';
 import '../theme/app_effects.dart';
 import '../theme/app_tokens.dart';
 import '../theme/landing_colors.dart';
@@ -132,17 +134,14 @@ String _formatRate(double rate) {
   return '₱$text';
 }
 
-/// True when the household has none of the details that the server does not
-/// return (occupants, provider, rate).
-bool _detailsMissing(Household h) =>
-    h.occupants <= 0 && h.provider.trim().isEmpty && h.ratePerKwh <= 0;
-
 /// The short note under the header, or null when there is nothing to say.
 String? _noteFor(Household h) {
   if (h.isSample) {
     return 'This is a sample household. Its values are placeholders.';
   }
-  if (h.occupants <= 0 || h.provider.trim().isEmpty || h.ratePerKwh <= 0) {
+  if (h.occupants <= 0 ||
+      h.provider.trim().isEmpty ||
+      h.billingCycleDay == null) {
     return 'Some household details are not available for this household.';
   }
   return null;
@@ -158,8 +157,8 @@ class _HouseholdHeader extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final meter = household.meterNumber?.trim();
-    final missingAll = _detailsMissing(household);
     final occupants = household.occupants;
+    final billingDay = household.billingCycleDay;
 
     return GlassCard(
       blur: 0,
@@ -263,13 +262,9 @@ class _HouseholdHeader extends StatelessWidget {
               ),
               const SizedBox(width: 14),
               Expanded(
-                child: _DetailTile(
-                  icon: Icons.payments_outlined,
-                  label: 'Rate per kWh',
-                  value: household.ratePerKwh <= 0
-                      ? null
-                      : _formatRate(household.ratePerKwh),
-                  unit: 'per kWh',
+                child: _HouseholdRateTile(
+                  key: ValueKey((household.id, household.provider)),
+                  household: household,
                 ),
               ),
               const SizedBox(width: 14),
@@ -277,7 +272,7 @@ class _HouseholdHeader extends StatelessWidget {
                 child: _DetailTile(
                   icon: Icons.event_outlined,
                   label: 'Billing cycle',
-                  value: missingAll ? null : 'Day ${household.billingCycleDay}',
+                  value: billingDay == null ? null : 'Day $billingDay',
                   unit: 'of the month',
                 ),
               ),
@@ -324,6 +319,59 @@ class _MeterChip extends StatelessWidget {
   }
 }
 
+class _HouseholdRateTile extends StatefulWidget {
+  const _HouseholdRateTile({super.key, required this.household});
+
+  final Household household;
+
+  @override
+  State<_HouseholdRateTile> createState() => _HouseholdRateTileState();
+}
+
+class _HouseholdRateTileState extends State<_HouseholdRateTile> {
+  late final Future<ProviderRate>? _rate;
+
+  @override
+  void initState() {
+    super.initState();
+    final household = widget.household;
+    final id = household.id;
+    _rate = id != null && !household.isSample && household.provider.isNotEmpty
+        ? ApiService.getCurrentElectricityRate(id)
+        : null;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<ProviderRate>(
+      future: _rate,
+      builder: (context, snapshot) {
+        final rate = snapshot.data;
+        final error = snapshot.error;
+        final tile = _DetailTile(
+          icon: Icons.payments_outlined,
+          label: 'Rate per kWh',
+          value: rate == null ? null : _formatRate(rate.ratePerKwh),
+          unit: 'per kWh',
+          missingLabel: switch (snapshot.connectionState) {
+            ConnectionState.waiting => 'Loading…',
+            _
+                when error is ApiException &&
+                    error.code != 'RATE_NOT_FOUND' &&
+                    error.code != 'PROVIDER_NOT_CONFIGURED' =>
+              'Could not load rate',
+            _ => 'Rate unavailable',
+          },
+        );
+        if (rate == null) return tile;
+        final date = MaterialLocalizations.of(context)
+            .formatMediumDate(rate.effectiveDate);
+        return Tooltip(message: 'Effective $date', child: tile);
+      },
+    );
+  }
+}
+
 /// One household detail: small icon and label on top, a prominent value below.
 /// A null [value] shows a muted "Not set".
 class _DetailTile extends StatelessWidget {
@@ -331,12 +379,14 @@ class _DetailTile extends StatelessWidget {
   final String label;
   final String? value;
   final String? unit;
+  final String missingLabel;
 
   const _DetailTile({
     required this.icon,
     required this.label,
     required this.value,
     this.unit,
+    this.missingLabel = 'Not set',
   });
 
   @override
@@ -371,7 +421,7 @@ class _DetailTile extends StatelessWidget {
           const SizedBox(height: 10),
           if (missing)
             Text(
-              'Not set',
+              missingLabel,
               style: TextStyle(
                 color: LandingColors.textSecondary,
                 fontSize: 17,
