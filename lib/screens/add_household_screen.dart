@@ -1,4 +1,4 @@
-
+﻿
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -10,6 +10,7 @@ import '../landing/landing_widgets.dart'
         LandingPrimaryButton,
         LandingSecondaryButton;
 import '../models/household.dart';
+import '../models/electricity_provider.dart';
 import '../theme/app_theme.dart';
 import '../theme/app_tokens.dart';
 import '../theme/landing_colors.dart';
@@ -33,8 +34,7 @@ class _AddHouseholdScreenState extends State<AddHouseholdScreen> {
   final _cityCtrl = TextEditingController();
   final _meterNumberCtrl = TextEditingController();
   final _occupantsCtrl = TextEditingController();
-  final _providerCtrl = TextEditingController();
-  final _rateCtrl = TextEditingController();
+  String? _selectedProvider;
   final _billingDayCtrl = TextEditingController();
 
   bool _isSaving = false;
@@ -46,8 +46,6 @@ class _AddHouseholdScreenState extends State<AddHouseholdScreen> {
     _cityCtrl.dispose();
     _meterNumberCtrl.dispose();
     _occupantsCtrl.dispose();
-    _providerCtrl.dispose();
-    _rateCtrl.dispose();
     _billingDayCtrl.dispose();
     super.dispose();
   }
@@ -67,8 +65,7 @@ class _AddHouseholdScreenState extends State<AddHouseholdScreen> {
       final street = _streetCtrl.text.trim();
       final city = _cityCtrl.text.trim();
       final occupants = int.parse(_occupantsCtrl.text.trim());
-      final provider = _providerCtrl.text.trim();
-      final rate = double.parse(_rateCtrl.text.trim());
+      final provider = _selectedProvider!;
       final billingDay = int.parse(_billingDayCtrl.text.trim());
 
       // Send all required household details to FastAPI.
@@ -78,7 +75,6 @@ class _AddHouseholdScreenState extends State<AddHouseholdScreen> {
         meterNumber: _meterNumberCtrl.text.trim(),
         occupants: occupants,
         electricityProvider: provider,
-        ratePerKwh: rate,
         billingCycleDay: billingDay,
       );
 
@@ -92,8 +88,7 @@ class _AddHouseholdScreenState extends State<AddHouseholdScreen> {
           city: city,
           occupants: occupants,
           provider: provider,
-          ratePerKwh: rate,
-          billingCycleDay: billingDay,
+            billingCycleDay: billingDay,
         ),
       );
     } catch (e) {
@@ -276,52 +271,26 @@ class _AddHouseholdScreenState extends State<AddHouseholdScreen> {
                     max: 50,
                   ),
                 ),
-                _field(
-                  controller: _providerCtrl,
-                  label: 'Electricity Provider',
-                  icon: Icons.bolt_rounded,
-                  capitalization: TextCapitalization.words,
-                  validator: (v) =>
-                      _validateRequired(v, 'Electricity provider'),
-                ),
+                _providerDropdown(),
               ),
               const SizedBox(height: 16),
 
-              _fieldRow(
-                twoCol,
-                _field(
-                  controller: _rateCtrl,
-                  label: 'Rate per kWh (₱)',
-                  hint: 'e.g. 12.50',
-                  helper: 'Price per kWh on your bill',
-                  icon: Icons.payments_outlined,
-                  keyboardType: const TextInputType.numberWithOptions(
-                    decimal: true,
-                  ),
-                  formatters: [
-                    FilteringTextInputFormatter.allow(
-                      RegExp(r'^\d*\.?\d{0,4}'),
-                    ),
-                  ],
-                  validator: _validateRate,
-                ),
-                _field(
-                  controller: _billingDayCtrl,
-                  label: 'Billing Cycle Day',
-                  hint: '1 to 31',
-                  helper: 'Day of the month (1–31)',
-                  icon: Icons.event_outlined,
-                  keyboardType: TextInputType.number,
-                  formatters: [
-                    FilteringTextInputFormatter.digitsOnly,
-                  ],
-                  last: true,
-                  validator: (v) => _validateWholeNumber(
-                    v,
-                    label: 'Billing cycle day',
-                    min: 1,
-                    max: 31,
-                  ),
+              _field(
+                controller: _billingDayCtrl,
+                label: 'Billing Cycle Day',
+                hint: '1 to 31',
+                helper: 'Day of the month (1â€“31)',
+                icon: Icons.event_outlined,
+                keyboardType: TextInputType.number,
+                formatters: [
+                  FilteringTextInputFormatter.digitsOnly,
+                ],
+                last: true,
+                validator: (v) => _validateWholeNumber(
+                  v,
+                  label: 'Billing cycle day',
+                  min: 1,
+                  max: 31,
                 ),
               ),
               const SizedBox(height: 24),
@@ -382,6 +351,36 @@ class _AddHouseholdScreenState extends State<AddHouseholdScreen> {
     );
   }
 
+  // Displays the shared Mindanao electricity provider list.
+  Widget _providerDropdown() {
+    return DropdownButtonFormField<String>(
+      initialValue: _selectedProvider,
+      isExpanded: true,
+      decoration: InputDecoration(
+        labelText: 'Electricity Provider',
+        prefixIcon: Icon(
+          Icons.bolt_rounded,
+          size: 18,
+          color: LandingColors.textSecondary,
+        ),
+      ),
+      items: mindanaoElectricityProviders.map((provider) {
+        return DropdownMenuItem<String>(
+          value: provider.code,
+          child: Text(provider.label),
+        );
+      }).toList(),
+      onChanged: _isSaving
+          ? null
+          : (value) {
+              setState(() {
+                _selectedProvider = value;
+              });
+            },
+      validator: (value) =>
+          value == null ? 'Electricity provider is required' : null,
+    );
+  }
   // Creates a text field using the shared E-FORECAST input style.
   Widget _field({
     required TextEditingController controller,
@@ -466,19 +465,5 @@ String? _validateWholeNumber(
   return null;
 }
 
-/// Validates a positive decimal number.
-String? _validateRate(String? value) {
-  final text = value?.trim() ?? '';
 
-  if (text.isEmpty) return 'Rate per kWh is required';
 
-  final rate = double.tryParse(text);
-
-  if (rate == null) {
-    return 'Enter a valid number, e.g. 12.50';
-  }
-
-  if (rate <= 0) return 'Rate must be greater than 0';
-
-  return null;
-}

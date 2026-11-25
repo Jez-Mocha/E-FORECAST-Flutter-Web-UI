@@ -15,7 +15,7 @@ import '../theme/landing_colors.dart';
 import '../widgets/dashboard_sidebar.dart';
 import '../widgets/welcome_greeting.dart';
 import '../widgets/household_card.dart';
-import 'add_household_screen.dart';
+import 'package:e_forecast/screens/add_household_screen.dart';
 import 'home_screen.dart';
 import 'household_dashboard_screen.dart';
 import 'profile_settings_screen.dart';

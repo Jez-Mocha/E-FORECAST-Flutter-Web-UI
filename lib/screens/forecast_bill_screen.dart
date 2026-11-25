@@ -51,6 +51,10 @@ class _ForecastBillScreenState extends State<ForecastBillScreen> {
   double _currentBill = 0;
   double _projectedBill = 0;
 
+  double _electricityRate = 0;
+  String? _rateProvider;
+  DateTime? _rateEffectiveDate;
+
   DateTime? _periodStart;
   DateTime? _nextPeriodStart;
 
@@ -110,7 +114,6 @@ class _ForecastBillScreenState extends State<ForecastBillScreen> {
   /// Direct monthly kWh entries are intentionally not included here.
   Future<void> _loadBillEstimates() async {
     final householdId = widget.household.id;
-    final rate = widget.household.ratePerKwh;
     final cycleDay = widget.household.billingCycleDay;
 
     if (householdId == null) return;
@@ -121,18 +124,36 @@ class _ForecastBillScreenState extends State<ForecastBillScreen> {
       _hasBillRecords = false;
     });
 
-    if (rate <= 0) {
+    try {
+      final rateData =
+          await ApiService.getCurrentElectricityRate(householdId);
+
+      final rateValue = rateData['rate_per_kwh'];
+      final rate = rateValue is num
+          ? rateValue.toDouble()
+          : double.tryParse(rateValue.toString());
+
+      if (rate == null || rate <= 0) {
+        throw const ApiException(
+          'The server returned an invalid electricity rate.',
+        );
+      }
+
+      final provider = rateData['provider']?.toString();
+      final effectiveDate = DateTime.tryParse(
+        rateData['effective_date']?.toString() ?? '',
+      );
+
       if (!mounted) return;
 
       setState(() {
-        _billLoading = false;
-        _billError =
-            'Please set a valid electricity rate in your household details.';
-      });
-      return;
-    }
+        _electricityRate = rate;
+        _rateProvider = provider;
+        _rateEffectiveDate = effectiveDate;
+      });  
 
-    try {
+
+
       final now = DateTime.now();
       final today = DateTime(now.year, now.month, now.day);
 
@@ -590,7 +611,15 @@ class _ForecastBillScreenState extends State<ForecastBillScreen> {
                     ),
                     const SizedBox(height: AppSpacing.xs),
                     Text(
-                      'Electricity rate: ${_money(widget.household.ratePerKwh)} per kWh',
+                      'Electricity rate: ${_money(_electricityRate)} per kWh',
+                      style: TextStyle(
+                        color: LandingColors.textSecondary,
+                        fontSize: AppText.caption,
+                      ),
+                    ),
+                    Text(
+                      '${_rateProvider ?? 'Provider unavailable'}'
+                      '${_rateEffectiveDate != null ? ' • Effective ${_rateEffectiveDate!.toIso8601String().split('T').first}' : ''}',
                       style: TextStyle(
                         color: LandingColors.textSecondary,
                         fontSize: AppText.caption,

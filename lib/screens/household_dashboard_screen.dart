@@ -136,7 +136,9 @@ class HouseholdDashboardScreen extends StatelessWidget {
 
 /// Formats the rate for display, e.g. 12.5 -> "₱12.50 per kWh".
 /// Keeps up to 4 decimals if the user entered them.
-String _formatRate(double rate) {
+String _formatRate(double? rate) {
+  if (rate == null) return 'Rate not configured';
+
   final text = rate.toStringAsFixed(4).replaceFirst(RegExp(r'0{1,2}$'), '');
   return '₱$text per kWh';
 }

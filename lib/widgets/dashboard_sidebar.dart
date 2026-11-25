@@ -21,8 +21,9 @@ class DashboardSidebar extends StatelessWidget {
 
   /// Opens the existing Add Household screen.
   final VoidCallback? onAddHousehold;
+  final bool showAddHousehold;
 
-  const DashboardSidebar({super.key, this.onAddHousehold});
+  const DashboardSidebar({super.key, this.onAddHousehold, this.showAddHousehold = true,});
 
   @override
   Widget build(BuildContext context) {
@@ -59,11 +60,14 @@ class DashboardSidebar extends StatelessWidget {
                         selected: true,
                       ),
                       const SizedBox(height: 4),
-                      AppNavItem(
-                        icon: Icons.add_rounded,
-                        label: 'Add Household',
-                        onTap: onAddHousehold,
-                      ),
+                      if (showAddHousehold) ...[
+                        const SizedBox(height: 4),
+                        AppNavItem(
+                          icon: Icons.add_rounded,
+                          label: 'Add Household',
+                          onTap: onAddHousehold,
+                        ),
+                      ],
                       const _GroupLabel('ELECTRICITY RATES'),
                       const Padding(
                         padding: EdgeInsets.symmetric(horizontal: 6),

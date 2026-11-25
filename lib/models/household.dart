@@ -10,7 +10,7 @@ class Household {
   final String city;
   final int occupants;
   final String provider;
-  final double ratePerKwh;
+  final double? ratePerKwh;
   final int billingCycleDay;
 
   /// True only for built-in demo households.
@@ -24,7 +24,7 @@ class Household {
     required this.city,
     required this.occupants,
     required this.provider,
-    required this.ratePerKwh,
+    this.ratePerKwh,
     required this.billingCycleDay,
     this.meterNumber,
     this.isSample = false,
@@ -55,10 +55,7 @@ class Household {
           ) ??
           0,
       provider: (json['electricity_provider'] ?? '').toString(),
-      ratePerKwh: double.tryParse(
-            '${json['rate_per_kwh'] ?? ''}',
-          ) ??
-          0.0,
+      ratePerKwh: (json['rate_per_kwh'] as num?)?.toDouble(),
       billingCycleDay: int.tryParse(
             '${json['billing_cycle_day'] ?? ''}',
           ) ??

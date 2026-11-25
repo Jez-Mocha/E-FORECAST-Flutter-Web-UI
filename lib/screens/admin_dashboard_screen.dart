@@ -1,4 +1,6 @@
-import 'package:flutter/material.dart';
+﻿import 'package:flutter/material.dart';
+
+import '../models/electricity_provider.dart';
 
 import '../services/api_service.dart';
 import '../theme/app_theme.dart';
@@ -24,17 +26,36 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
   bool _showRegisteredHouseholds = false;
   bool _showForecastMonitoring = false;
   bool _showConsumptionRecords = false;
+  bool _showElectricityRates = false;
   
 
   List<Map<String, dynamic>> _users = [];
   List<Map<String, dynamic>> _households = [];
   List<Map<String, dynamic>> _forecasts = [];
   List<Map<String, dynamic>> _consumption = [];
+  List<Map<String, dynamic>> _rates = [];
+
+  String? _selectedProvider;
+  final _rateController = TextEditingController();
+  final _effectiveDateController = TextEditingController();
+  final _sourceUrlController = TextEditingController();
+  final _remarksController = TextEditingController();
+
+  bool _isSavingRate = false;
 
   @override
   void initState() {
     super.initState();
     _loadAdminData();
+  }
+
+  @override
+  void dispose() {
+    _rateController.dispose();
+    _effectiveDateController.dispose();
+    _sourceUrlController.dispose();
+    _remarksController.dispose();
+    super.dispose();
   }
 
   Future<void> _loadAdminData() async {
@@ -49,6 +70,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
         ApiService.getAdminHouseholds(),
         ApiService.getAdminForecasts(),
         ApiService.getAdminConsumption(),
+        ApiService.getAdminRates(),
       ]);
 
       if (!mounted) return;
@@ -59,6 +81,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
         _forecasts = results[2];
         _consumption = results[3];
         _isLoading = false;
+        _rates = results[4];
       });
     } catch (e) {
       if (!mounted) return;
@@ -93,7 +116,6 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
         body: Row(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            const DashboardSidebar(),
             Expanded(
               child: Column(
                 children: [
@@ -201,6 +223,26 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                                   _buildConsumptionRecordsTable(),
                                 ],
 
+                                const SizedBox(height: 16),
+                                _buildSection(
+                                  'Electricity Rates',
+                                  'Manage provider-specific electricity rates',
+                                  _rates.length,
+                                  Icons.electric_bolt_outlined,
+                                  onTap: () {
+                                    setState(() {
+                                      _showElectricityRates = !_showElectricityRates;
+                                    });
+                                  },
+
+                                ),
+
+                                if (_showElectricityRates) ...[
+                                  const SizedBox(height: 12),
+                                  _buildAddRateForm(),
+                                  const SizedBox(height: 20),
+                                  _buildElectricityRatesTable(),
+                                ],
                               ],
                             ],
                           ),
@@ -214,6 +256,244 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
           ],
         ),
       ),
+    );
+  }
+
+
+  Future<void> _selectEffectiveDate() async {
+    final today = DateTime.now();
+
+    final selectedDate = await showDatePicker(
+      context: context,
+      initialDate: today,
+      firstDate: DateTime(2020),
+      lastDate: DateTime(2100),
+      helpText: 'Select rate effective date',
+    );
+
+    if (selectedDate != null && mounted) {
+      setState(() {
+        _effectiveDateController.text =
+            selectedDate.toIso8601String().split('T').first;
+      });
+    }
+  }
+
+  Future<void> _saveAdminRate() async {
+    final provider = _selectedProvider;
+    final rate = double.tryParse(_rateController.text.trim());
+    final effectiveDate = _effectiveDateController.text.trim();
+
+    if (provider == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Select an electricity provider.')),
+      );
+      return;
+    }
+
+    if (rate == null || rate <= 0) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Enter a valid rate greater than zero.')),
+      );
+      return;
+    }
+
+    if (effectiveDate.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Select an effective date.')),
+      );
+      return;
+    }
+
+    setState(() => _isSavingRate = true);
+
+    try {
+      await ApiService.addAdminRate(
+        provider: provider,
+        ratePerKwh: rate,
+        effectiveDate: effectiveDate,
+        sourceUrl: _sourceUrlController.text.trim().isEmpty
+            ? null
+            : _sourceUrlController.text.trim(),
+        remarks: _remarksController.text.trim().isEmpty
+            ? null
+            : _remarksController.text.trim(),
+      );
+
+      final updatedRates = await ApiService.getAdminRates();
+
+      if (!mounted) return;
+
+      setState(() {
+        _rates = updatedRates;
+        _selectedProvider = null;
+        _rateController.clear();
+        _effectiveDateController.clear();
+        _sourceUrlController.clear();
+        _remarksController.clear();
+      });
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Electricity rate added successfully.'),
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Failed to add electricity rate: ${e.toString()}',
+          ),
+        ),
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _isSavingRate = false);
+      }
+    }
+  }
+  Widget _buildAddRateForm() {
+    return Card(
+      elevation: 0,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16),
+        side: BorderSide(color: Colors.grey.shade300),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Add New Electricity Rate',
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              'Enter the provider rate and its effective date.',
+              style: TextStyle(color: Colors.grey.shade600),
+            ),
+            const SizedBox(height: 20),
+            DropdownButtonFormField<String>(
+  initialValue: _selectedProvider,
+  isExpanded: true,
+  decoration: const InputDecoration(
+    labelText: 'Electricity Provider',
+    border: OutlineInputBorder(),
+  ),
+  items: mindanaoElectricityProviders.map((provider) {
+    return DropdownMenuItem<String>(
+      value: provider.code,
+      child: Text(provider.label),
+    );
+  }).toList(),
+  onChanged: _isSavingRate
+      ? null
+      : (value) {
+          setState(() {
+            _selectedProvider = value;
+          });
+        },
+),
+            const SizedBox(height: 14),
+            TextField(
+              controller: _rateController,
+              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              decoration: const InputDecoration(
+                labelText: 'Rate per kWh (₱)',
+                hintText: 'e.g. 12.50',
+                border: OutlineInputBorder(),
+              ),
+            ),
+            const SizedBox(height: 14),
+            TextField(
+              controller: _effectiveDateController,
+              readOnly: true,
+              onTap: _selectEffectiveDate,
+              decoration: const InputDecoration(
+                labelText: 'Effective Date',
+                hintText: 'Select effective date',
+                suffixIcon: Icon(Icons.calendar_today),
+                border: OutlineInputBorder(),
+              ),
+            ),
+            const SizedBox(height: 14),
+            TextField(
+              controller: _sourceUrlController,
+              keyboardType: TextInputType.url,
+              decoration: const InputDecoration(
+                labelText: 'Source URL (Optional)',
+                hintText: 'https://example.com',
+                border: OutlineInputBorder(),
+              ),
+            ),
+            const SizedBox(height: 14),
+            TextField(
+              controller: _remarksController,
+              maxLines: 3,
+              decoration: const InputDecoration(
+                labelText: 'Remarks (Optional)',
+                border: OutlineInputBorder(),
+              ),
+            ),
+            const SizedBox(height: 20),
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton.icon(
+                onPressed: _isSavingRate ? null : _saveAdminRate,
+                icon: _isSavingRate
+                    ? const SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.save_outlined),
+                label: Text(
+                  _isSavingRate ? 'Saving...' : 'Save Electricity Rate',
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+  Widget _buildElectricityRatesTable() {
+    if (_rates.isEmpty) {
+      return const Padding(
+        padding: EdgeInsets.all(16),
+        child: Text('No electricity rate records found.'),
+      );
+    }
+
+    return Column(
+      children: _rates.map((rate) {
+        final provider =
+            rate['provider']?.toString() ?? 'Legacy / Unassigned';
+        final amount =
+            double.tryParse(rate['rate_per_kwh']?.toString() ?? '') ?? 0;
+        final effectiveDate =
+            rate['effective_date']?.toString() ?? 'N/A';
+        final remarks = rate['remarks']?.toString() ?? '';
+
+        return Card(
+          margin: const EdgeInsets.only(bottom: 10),
+          child: ListTile(
+            leading: const Icon(Icons.electric_bolt_outlined),
+            title: Text(provider),
+            subtitle: Text(
+              'Effective: $effectiveDate'
+              '${remarks.isNotEmpty ? '\n$remarks' : ''}',
+            ),
+            trailing: Text(
+              '₱${amount.toStringAsFixed(2)}/kWh',
+              style: const TextStyle(fontWeight: FontWeight.bold),
+            ),
+          ),
+        );
+      }).toList(),
     );
   }
 
@@ -793,3 +1073,14 @@ class _OverviewCard extends StatelessWidget {
     );
   }
 }
+
+
+
+
+
+
+
+
+
+
+

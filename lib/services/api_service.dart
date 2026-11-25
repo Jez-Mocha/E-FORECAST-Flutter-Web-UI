@@ -1,4 +1,4 @@
-﻿import 'dart:async';
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:http/http.dart' as http;
@@ -151,7 +151,38 @@ class ApiService {
     };
   }
 
-   // ── Admin API Methods ─────────────────────────
+  // Retrieve the profile of the authenticated household user.
+  static Future<Map<String, dynamic>> getMyProfile() async {
+    final response = await http
+        .get(
+          Uri.parse('$baseUrl/api/users/me'),
+          headers: await _authHeaders(),
+        )
+        .timeout(const Duration(seconds: 15));
+
+    return _handleResponse(response);
+  }
+
+  // Update the username and email of the authenticated household user.
+  static Future<Map<String, dynamic>> updateMyProfile({
+    required String username,
+    required String email,
+  }) async {
+    final response = await http
+        .put(
+          Uri.parse('$baseUrl/api/users/me'),
+          headers: await _authHeaders(),
+          body: jsonEncode({
+            'username': username.trim(),
+            'email': email.trim(),
+          }),
+        )
+        .timeout(const Duration(seconds: 15));
+
+    return _handleResponse(response);
+  }
+
+   // -- Admin API Methods -------------------------
 
    // Shared method for retrieving admin lists.
    static Future<List<Map<String, dynamic>>> _getAdminList(
@@ -200,6 +231,39 @@ class ApiService {
     return _getAdminList('/api/admin/consumption', 'records');
   }
 
+    // Retrieve all electricity rate records for admin management.
+  static Future<List<Map<String, dynamic>>> getAdminRates() {
+    return _getAdminList('/api/admin/rates', 'rates');
+  }
+
+  // Add a new provider-specific electricity rate.
+  // Existing rate records are preserved as history.
+  static Future<Map<String, dynamic>> addAdminRate({
+    required String provider,
+    required double ratePerKwh,
+    required String effectiveDate,
+    String? sourceUrl,
+    String? remarks,
+  }) async {
+    final response = await http
+        .put(
+          Uri.parse('$baseUrl/api/admin/rates'),
+          headers: {
+            ...await _authHeaders(),
+            'Content-Type': 'application/json',
+          },
+          body: jsonEncode({
+            'provider': provider.trim(),
+            'rate_per_kwh': ratePerKwh,
+            'effective_date': effectiveDate,
+            'source_url': sourceUrl?.trim(),
+            'remarks': remarks?.trim(),
+          }),
+        )
+        .timeout(const Duration(seconds: 15));
+
+    return _handleResponse(response);
+  }
 
   static Future<List<Map<String, dynamic>>> getHouseholds() async {
     final response = await http
@@ -228,7 +292,6 @@ class ApiService {
     required String meterNumber,
     required int occupants,
     required String electricityProvider,
-    required double ratePerKwh,
     required int billingCycleDay,
   }) async {
     final response = await http
@@ -241,7 +304,6 @@ class ApiService {
             'meter_number': meterNumber,
             'occupants': occupants,
             'electricity_provider': electricityProvider,
-            'rate_per_kwh': ratePerKwh,
             'billing_cycle_day': billingCycleDay,
           }),
         )
@@ -274,6 +336,33 @@ static Future<Map<String, dynamic>?> getLastMeterReading(
     'reading_date': decoded['last_consumption_date'],
   };
 }
+
+  // Retrieve the current provider-specific electricity rate.
+  static Future<Map<String, dynamic>> getCurrentElectricityRate(
+    int householdId,
+  ) async {
+    final response = await http
+        .get(
+          Uri.parse('$baseUrl/api/electricity-rates/current').replace(
+            queryParameters: {
+              'household_id': '$householdId',
+            },
+          ),
+          headers: await _authHeaders(),
+        )
+        .timeout(const Duration(seconds: 15));
+
+    final decoded = _handleResponse(response);
+
+    if (decoded['rate_per_kwh'] == null ||
+        decoded['provider'] == null) {
+      throw const ApiException(
+        'The server returned incomplete electricity rate information.',
+      );
+    }
+
+    return decoded;
+  }
 
 
   static Future<List<ConsumptionRecord>> getConsumptionHistory(
