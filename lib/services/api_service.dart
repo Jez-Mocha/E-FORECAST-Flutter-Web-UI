@@ -3,639 +3,404 @@ import 'dart:convert';
 
 import 'package:http/http.dart' as http;
 
+import '../models/account_profile.dart';
+import '../models/auth_session.dart';
+import '../models/billing_data.dart';
 import '../models/consumption_record.dart';
 import '../models/forecast_result.dart';
+import '../models/household.dart';
 import '../models/usage_summary.dart';
 
-/// An error from the backend with a message that is safe to show the user.
-/// Used by the consumption and household-saving methods. Other methods still
-/// throw a plain Exception, as before.
+/// Backend error with a message safe to display.
 class ApiException implements Exception {
-  /// HTTP status code, e.g. 409. Null if the server could not be reached.
-  final int? statusCode;
-
-  /// Backend error code, e.g. "DUPLICATE_CONSUMPTION_RECORD".
-  final String? code;
-
-  /// Friendly message to show on screen.
-  final String message;
-
   const ApiException(this.message, {this.statusCode, this.code});
 
-  /// True when the login token is missing or expired (HTTP 401).
-  bool get isSessionExpired => statusCode == 401;
+  final String message;
+  final int? statusCode;
+  final String? code;
+
+  bool get isSessionExpired =>
+      statusCode == 401 && code != 'INVALID_CREDENTIALS';
 
   @override
   String toString() => message;
 }
 
 class ApiService {
-  // Flutter Web running in Chrome on the same PC.
-  static const String baseUrl = 'http://127.0.0.1:8000';
+  static const baseUrl = String.fromEnvironment(
+    'API_BASE_URL',
+    defaultValue: 'http://127.0.0.1:8000',
+  );
 
-  // Stores the token while the app is running.
-  static String? accessToken;
+  static AuthSession? _session;
+  static Timer? _expiryTimer;
+  static final _expired = StreamController<void>.broadcast();
+
+  static AuthSession? get session => _session;
+  static int? get currentUserId => _session?.userId;
+  static Stream<void> get sessionExpired => _expired.stream;
+
+  static const _sessionExpired = ApiException(
+    'Your session has expired. Please log in again.',
+    statusCode: 401,
+    code: 'AUTHENTICATION_REQUIRED',
+  );
+  static const _unexpected = ApiException(
+    'The server sent an unexpected response. Please try again.',
+  );
 
   static Future<bool> testConnection() async {
     try {
-      final response = await http
-          .get(Uri.parse('$baseUrl/openapi.json'))
-          .timeout(const Duration(seconds: 10));
-
-      return response.statusCode == 200;
-    } catch (e) {
+      return (await _request('/api/health', authenticated: false))['status'] ==
+          'ok';
+    } on ApiException {
       return false;
     }
   }
 
-  // Register a new user.
-  static Future<Map<String, dynamic>> register({
+  static Future<AuthSession> login({
+    required String usernameOrEmail,
+    required String password,
+  }) => _authenticate('/api/auth/login', {
+    'username_or_email': usernameOrEmail.trim(),
+    'password': password,
+  });
+
+  static Future<AuthSession> register({
     required String username,
     required String email,
     required String password,
-  }) async {
-    final response = await http.post(
-      Uri.parse('$baseUrl/api/auth/register'),
-      headers: {'Content-Type': 'application/json'},
-      body: jsonEncode({
-        'username': username,
-        'email': email,
-        'password': password,
-      }),
+  }) => _authenticate('/api/auth/register', {
+    'username': username.trim(),
+    'email': email.trim().toLowerCase(),
+    'password': password,
+  });
+
+  static Future<AuthSession> _authenticate(
+    String path,
+    Map<String, dynamic> body,
+  ) async {
+    final result = await _request(path, body: body, authenticated: false);
+    final session = _parse(() => AuthSession.fromJson(result));
+    _expiryTimer?.cancel();
+    _session = session;
+    _expiryTimer = Timer(
+      session.expiresAt.difference(DateTime.now()),
+      () => _expire(session),
     );
-
-    final result = _handleResponse(response);
-
-    // The backend logs the new user in: keep the token it returns.
-    accessToken = result['token']?.toString();
-
-    return result;
+    return session;
   }
 
-  // Log in and save the authentication token.
-  static Future<Map<String, dynamic>> login({
-    required String usernameOrEmail,
-    required String password,
-  }) async {
-    final response = await http.post(
-      Uri.parse('$baseUrl/api/auth/login'),
-      headers: {'Content-Type': 'application/json'},
-      body: jsonEncode({
-        'username_or_email': usernameOrEmail,
-        'password': password,
-      }),
-    );
-
-    final result = _handleResponse(response);
-
-    accessToken = result['token']?.toString();
-
-    return result;
-  }
-
-  // The id of the logged-in user, read from the login token (the backend
-  // puts it in the token's "sub" field). Null if nobody is logged in or the
-  // token cannot be read. Only used to name browser-saved preferences. It is
-  // not proof of identity.
-  static int? get currentUserId {
-    final token = accessToken;
-    if (token == null || token.isEmpty) return null;
-
-    final parts = token.split('.');
-    if (parts.length != 3) return null;
-
-    try {
-      final payload = utf8.decode(
-        base64Url.decode(base64Url.normalize(parts[1])),
-      );
-      final decoded = jsonDecode(payload);
-
-      if (decoded is Map<String, dynamic>) {
-        return int.tryParse('${decoded['sub']}');
-      }
-    } catch (_) {
-      // Fall through: the id could not be read.
-    }
-
-    return null;
-  }
-
-  // Log out: forget the authentication token kept in memory.
   static void logout() {
-    accessToken = null;
+    _expiryTimer?.cancel();
+    _expiryTimer = null;
+    _session = null;
   }
 
-  // Fetch households belonging to the authenticated user.
-  static Future<List<Map<String, dynamic>>> getHouseholds() async {
-    if (accessToken == null || accessToken!.isEmpty) {
-      throw Exception('Please log in before loading households.');
-    }
-
-    final response = await http.get(
-      Uri.parse('$baseUrl/api/households'),
-      headers: {
-        'Authorization': 'Bearer $accessToken',
-        'Content-Type': 'application/json',
-      },
-    );
-
-    final result = _handleResponse(response);
-    final households = result['households'];
-
-    if (households is! List) {
-      throw Exception('Invalid households response from server.');
-    }
-
-    return households.whereType<Map<String, dynamic>>().toList();
+  static void _expire(AuthSession session) {
+    if (!identical(_session, session)) return;
+    logout();
+    _expired.add(null);
   }
 
-  // Register a new household on the server.
-  // Success (201) returns: {household_id, meter_number, message}.
-  // On failure this throws an [ApiException] with a friendly message.
-  static Future<Map<String, dynamic>> createHousehold({
+  static Future<List<Map<String, dynamic>>> getHouseholds() =>
+      _getList('/api/households', 'households');
+
+  static Future<Household> createHousehold({
     required String householdName,
     required String address,
     required String meterNumber,
+    required int occupants,
+    required String electricityProvider,
+    required int billingCycleDay,
   }) async {
-    if (accessToken == null || accessToken!.isEmpty) {
+    final result = await _request(
+      '/api/households',
+      body: {
+        'household_name': householdName,
+        'address': address,
+        'meter_number': meterNumber,
+        'occupants': occupants,
+        'electricity_provider': electricityProvider,
+        'billing_cycle_day': billingCycleDay,
+      },
+    );
+    final household = _parse(() => Household.fromJson(result));
+    if (household.id == null) {
       throw const ApiException(
-        'Your session has expired. Please log in again.',
-        statusCode: 401,
-        code: 'AUTHENTICATION_REQUIRED',
+        'The server did not confirm the household. Check My Households before retrying.',
       );
     }
-
-    final http.Response response;
-
-    try {
-      response = await http
-          .post(
-            Uri.parse('$baseUrl/api/households'),
-            headers: {
-              'Authorization': 'Bearer $accessToken',
-              'Content-Type': 'application/json',
-            },
-            body: jsonEncode({
-              'household_name': householdName,
-              'address': address,
-              'meter_number': meterNumber,
-            }),
-          )
-          .timeout(const Duration(seconds: 15));
-    } on TimeoutException {
-      throw const ApiException(
-        'The server took too long to respond. Please try again.',
-      );
-    } catch (e) {
-      throw const ApiException(
-        'Could not reach the server. Check that the backend is running.',
-      );
-    }
-
-    if (response.statusCode >= 200 && response.statusCode < 300) {
-      final dynamic decoded = _tryDecode(response.body);
-
-      if (decoded is Map<String, dynamic>) {
-        return decoded;
-      }
-
-      return {'data': decoded};
-    }
-
-    final error = _buildApiException(response);
-
-    if (error.statusCode == 409) {
-      throw ApiException(
-        'This meter number is already registered to a household.',
-        statusCode: 409,
-        code: error.code,
-      );
-    }
-
-    if (error.statusCode == 422) {
-      throw ApiException(
-        'Please check the household name, address and meter number.',
-        statusCode: 422,
-        code: error.code,
-      );
-    }
-
-    throw error;
+    return household;
   }
 
-  // Get the household's most recent saved meter reading (its meter_current).
-  // Returns null if the household has no saved readings yet.
-  // The newest record is chosen by its date, so the order of the list from
-  // the server does not matter.
-  // On failure this throws an [ApiException] with a friendly message.
-  static Future<double?> getLastMeterReading(int householdId) async {
-    if (accessToken == null || accessToken!.isEmpty) {
-      throw const ApiException(
-        'Your session has expired. Please log in again.',
-        statusCode: 401,
-        code: 'AUTHENTICATION_REQUIRED',
-      );
-    }
-
-    final http.Response response;
-
-    try {
-      response = await http
-          .get(
-            Uri.parse('$baseUrl/api/consumption/history')
-                .replace(queryParameters: {'household_id': '$householdId'}),
-            headers: {
-              'Authorization': 'Bearer $accessToken',
-              'Content-Type': 'application/json',
-            },
-          )
-          .timeout(const Duration(seconds: 15));
-    } on TimeoutException {
-      throw const ApiException(
-        'The server took too long to respond. Please try again.',
-      );
-    } catch (e) {
-      throw const ApiException(
-        'Could not reach the server. Check that the backend is running.',
-      );
-    }
-
-    if (response.statusCode < 200 || response.statusCode >= 300) {
-      throw _buildApiException(response);
-    }
-
-    final dynamic decoded = _tryDecode(response.body);
-
-    if (decoded is! Map<String, dynamic>) return null;
-
-    final records = decoded['records'];
-
-    if (records is! List) return null;
-
-    double? latestReading;
-    DateTime? latestDate;
-
-    for (final record in records) {
-      if (record is! Map) continue;
-
-      final date = DateTime.tryParse('${record['date'] ?? ''}');
-      final reading = _toDouble(record['meter_current']);
-
-      // Skip records that have no date or no current reading.
-      if (date == null || reading == null) continue;
-
-      if (latestDate == null || date.isAfter(latestDate)) {
-        latestDate = date;
-        latestReading = reading;
-      }
-    }
-
-    return latestReading;
+  static Future<MeterReading?> getLatestMeterReading(int householdId) async {
+    final result = await _request(
+      '/api/consumption/latest-meter',
+      query: {'household_id': '$householdId'},
+    );
+    if (result['has_previous_record'] == false) return null;
+    return _parse(
+      () => (
+        value: (result['last_meter_reading'] as num).toDouble(),
+        date: DateTime.parse(result['last_consumption_date'] as String),
+      ),
+    );
   }
 
-  // Get saved meter readings for a household, newest first.
-  // By default every reading is returned. Pass [startDate] and/or [endDate]
-  // to get only the readings inside that range (both days included). A date
-  // that is left out (null) is simply not sent to the server.
-  // Records that cannot be read (for example, with no valid date) are
-  // skipped, so one bad record never breaks the whole list.
-  // Returns an empty list if there are no saved readings.
-  // On failure this throws an [ApiException] with a friendly message.
+  /// Returns saved readings newest first. Unusable legacy records are skipped.
   static Future<List<ConsumptionRecord>> getConsumptionHistory(
     int householdId, {
     DateTime? startDate,
     DateTime? endDate,
   }) async {
-    if (accessToken == null || accessToken!.isEmpty) {
-      throw const ApiException(
-        'Your session has expired. Please log in again.',
-        statusCode: 401,
-        code: 'AUTHENTICATION_REQUIRED',
-      );
-    }
-
-    // household_id is always sent. The dates are added only when given.
-    final query = <String, String>{'household_id': '$householdId'};
-
-    if (startDate != null) query['start_date'] = _formatDate(startDate);
-    if (endDate != null) query['end_date'] = _formatDate(endDate);
-
-    final http.Response response;
-
-    try {
-      response = await http
-          .get(
-            Uri.parse('$baseUrl/api/consumption/history')
-                .replace(queryParameters: query),
-            headers: {
-              'Authorization': 'Bearer $accessToken',
-              'Content-Type': 'application/json',
-            },
-          )
-          .timeout(const Duration(seconds: 15));
-    } on TimeoutException {
-      throw const ApiException(
-        'The server took too long to respond. Please try again.',
-      );
-    } catch (e) {
-      throw const ApiException(
-        'Could not reach the server. Check that the backend is running.',
-      );
-    }
-
-    if (response.statusCode < 200 || response.statusCode >= 300) {
-      throw _buildApiException(response);
-    }
-
-    final dynamic decoded = _tryDecode(response.body);
-
-    if (decoded is! Map<String, dynamic>) {
-      throw const ApiException(
-        'The server sent an unexpected response. Please try again.',
-      );
-    }
-
-    final records = decoded['records'];
-
-    if (records is! List) {
-      throw const ApiException(
-        'The server sent an unexpected response. Please try again.',
-      );
-    }
-
-    final result = <ConsumptionRecord>[];
-
-    for (final item in records) {
-      if (item is! Map) continue;
-
-      final record = ConsumptionRecord.tryParse(item);
-
-      // Skip records that cannot be read.
-      if (record != null) result.add(record);
-    }
-
-    // Newest first, so the order from the server does not matter.
-    result.sort((a, b) => b.date.compareTo(a.date));
-
-    return result;
+    final rows = await _getList(
+      '/api/consumption/history',
+      'records',
+      query: {
+        'household_id': '$householdId',
+        if (startDate != null) 'start_date': _formatDate(startDate),
+        if (endDate != null) 'end_date': _formatDate(endDate),
+      },
+    );
+    return rows.map(ConsumptionRecord.tryParse).nonNulls.toList()
+      ..sort((a, b) => b.date.compareTo(a.date));
   }
 
-  // Get the usage totals (total kWh, average kWh per reading and number of
-  // readings) for one household between two dates, both days included.
-  // If there are no readings in that range, the server returns zeros.
-  // On failure this throws an [ApiException] with a friendly message.
   static Future<UsageSummary> getUsageSummary({
     required int householdId,
     required DateTime startDate,
     required DateTime endDate,
   }) async {
-    if (accessToken == null || accessToken!.isEmpty) {
-      throw const ApiException(
-        'Your session has expired. Please log in again.',
-        statusCode: 401,
-        code: 'AUTHENTICATION_REQUIRED',
-      );
-    }
-
-    final http.Response response;
-
-    try {
-      response = await http
-          .get(
-            Uri.parse('$baseUrl/api/usage/summary').replace(
-              queryParameters: {
-                'household_id': '$householdId',
-                'start_date': _formatDate(startDate),
-                'end_date': _formatDate(endDate),
-              },
-            ),
-            headers: {
-              'Authorization': 'Bearer $accessToken',
-              'Content-Type': 'application/json',
-            },
-          )
-          .timeout(const Duration(seconds: 15));
-    } on TimeoutException {
-      throw const ApiException(
-        'The server took too long to respond. Please try again.',
-      );
-    } catch (e) {
-      throw const ApiException(
-        'Could not reach the server. Check that the backend is running.',
-      );
-    }
-
-    if (response.statusCode < 200 || response.statusCode >= 300) {
-      throw _buildApiException(response);
-    }
-
-    final dynamic decoded = _tryDecode(response.body);
-
-    if (decoded is! Map<String, dynamic>) {
-      throw const ApiException(
-        'The server sent an unexpected response. Please try again.',
-      );
-    }
-
-    return UsageSummary.fromJson(decoded);
+    final result = await _request(
+      '/api/usage/summary',
+      query: {
+        'household_id': '$householdId',
+        'start_date': _formatDate(startDate),
+        'end_date': _formatDate(endDate),
+      },
+    );
+    return _parse(() => UsageSummary.fromJson(result));
   }
 
-  // Record one meter reading for a household.
-  // The backend calculates the kWh (current - previous) and returns it.
-  // Success (201) returns: {consumption_id, kwh, status, message}.
-  // On failure this throws an [ApiException] with a friendly message.
   static Future<Map<String, dynamic>> recordConsumption({
     required int householdId,
     required DateTime consumptionDate,
+    required DateTime previousReadingDate,
     required double meterPrevious,
     required double meterCurrent,
+  }) => _request(
+    '/api/consumption',
+    body: {
+      'household_id': householdId,
+      'consumption_date': _formatDate(consumptionDate),
+      'previous_reading_date': _formatDate(previousReadingDate),
+      'meter_previous': meterPrevious,
+      'meter_current': meterCurrent,
+    },
+  );
+
+  static Future<MonthlyConsumption> recordMonthlyConsumption({
+    required int householdId,
+    required DateTime billingMonth,
+    required double consumptionKwh,
   }) async {
-    if (accessToken == null || accessToken!.isEmpty) {
-      throw const ApiException(
-        'Your session has expired. Please log in again.',
-        statusCode: 401,
-        code: 'AUTHENTICATION_REQUIRED',
-      );
-    }
-
-    final http.Response response;
-
-    try {
-      response = await http
-          .post(
-            Uri.parse('$baseUrl/api/consumption'),
-            headers: {
-              'Authorization': 'Bearer $accessToken',
-              'Content-Type': 'application/json',
-            },
-            body: jsonEncode({
-              'household_id': householdId,
-              'consumption_date': _formatDate(consumptionDate),
-              'meter_previous': meterPrevious,
-              'meter_current': meterCurrent,
-            }),
-          )
-          .timeout(const Duration(seconds: 15));
-    } on TimeoutException {
-      throw const ApiException(
-        'The server took too long to respond. Please try again.',
-      );
-    } catch (e) {
-      throw const ApiException(
-        'Could not reach the server. Check that the backend is running.',
-      );
-    }
-
-    if (response.statusCode >= 200 && response.statusCode < 300) {
-      final dynamic decoded = _tryDecode(response.body);
-
-      if (decoded is Map<String, dynamic>) {
-        return decoded;
-      }
-
-      return {'data': decoded};
-    }
-
-    throw _buildApiException(response);
+    final result = await _request(
+      '/api/monthly-consumption',
+      body: {
+        'household_id': householdId,
+        'billing_month': _formatDate(
+          DateTime(billingMonth.year, billingMonth.month),
+        ),
+        'consumption_kwh': consumptionKwh,
+      },
+    );
+    return _parse(() => MonthlyConsumption.fromJson(result));
   }
 
-  // Ask the backend for a forecast for one household.
-  // It predicts the use for the day after the latest reading and the
-  // estimated bill. Success (200) returns: {forecast_id,
-  // predicted_consumption_kwh, estimated_bill, message}.
-  // If the household has fewer than 7 readings, the server answers 422 and
-  // this throws an [ApiException] with code INSUFFICIENT_HISTORICAL_DATA.
-  // On any failure this throws an [ApiException] with a friendly message.
+  static Future<List<MonthlyConsumption>> getMonthlyConsumptionHistory(
+    int householdId,
+  ) async {
+    final rows = await _getList(
+      '/api/monthly-consumption/history',
+      'records',
+      query: {'household_id': '$householdId'},
+    );
+    return _parse(() => rows.map(MonthlyConsumption.fromJson).toList());
+  }
+
+  static Future<ProviderRate> getCurrentElectricityRate(int householdId) async {
+    final result = await _request(
+      '/api/electricity-rates/current',
+      query: {'household_id': '$householdId'},
+    );
+    return _parse(() => ProviderRate.fromJson(result));
+  }
+
   static Future<ForecastResult> generateForecast({
     required int householdId,
   }) async {
-    if (accessToken == null || accessToken!.isEmpty) {
-      throw const ApiException(
-        'Your session has expired. Please log in again.',
-        statusCode: 401,
-        code: 'AUTHENTICATION_REQUIRED',
-      );
+    final result = await _request(
+      '/api/forecasts',
+      body: {'household_id': householdId},
+      timeout: const Duration(seconds: 30),
+    );
+    return _parse(() => ForecastResult.fromJson(result));
+  }
+
+  static Future<AccountProfile> getMyProfile() async {
+    final result = await _request('/api/users/me');
+    return _parse(() => AccountProfile.fromJson(result));
+  }
+
+  static Future<AccountProfile> updateMyProfile({
+    required String username,
+    required String email,
+  }) async {
+    final result = await _request(
+      '/api/users/me',
+      method: 'PUT',
+      body: {'username': username.trim(), 'email': email.trim().toLowerCase()},
+    );
+    return _parse(() => AccountProfile.fromJson(result));
+  }
+
+  static Future<List<Map<String, dynamic>>> getAdminUsers() =>
+      _getList('/api/admin/users', 'users');
+
+  static Future<List<Map<String, dynamic>>> getAdminHouseholds() =>
+      _getList('/api/admin/households', 'households');
+
+  static Future<List<Map<String, dynamic>>> getAdminForecasts() =>
+      _getList('/api/admin/forecasts', 'forecasts');
+
+  static Future<List<Map<String, dynamic>>> getAdminConsumption() =>
+      _getList('/api/admin/consumption', 'records');
+
+  static Future<List<ProviderRate>> getAdminRates() async {
+    final rows = await _getList('/api/admin/rates', 'rates');
+    return _parse(() => rows.map(ProviderRate.fromJson).toList());
+  }
+
+  static Future<ProviderRate> addAdminRate({
+    required String provider,
+    required double ratePerKwh,
+    required DateTime effectiveDate,
+    String? sourceUrl,
+    String? remarks,
+  }) async {
+    final result = await _request(
+      '/api/admin/rates',
+      method: 'PUT',
+      body: {
+        'provider': provider.trim(),
+        'rate_per_kwh': ratePerKwh,
+        'effective_date': _formatDate(effectiveDate),
+        'source_url': sourceUrl?.trim(),
+        'remarks': remarks?.trim(),
+      },
+    );
+    return _parse(() => ProviderRate.fromJson(result));
+  }
+
+  static Future<List<Map<String, dynamic>>> _getList(
+    String path,
+    String key, {
+    Map<String, String>? query,
+  }) async {
+    final result = await _request(path, query: query);
+    return _parse(
+      () => (result[key] as List).whereType<Map<String, dynamic>>().toList(),
+    );
+  }
+
+  static Future<Map<String, dynamic>> _request(
+    String path, {
+    String? method,
+    Map<String, String>? query,
+    Map<String, dynamic>? body,
+    bool authenticated = true,
+    Duration timeout = const Duration(seconds: 15),
+  }) async {
+    final active = authenticated ? _session : null;
+    if (authenticated && active == null) throw _sessionExpired;
+    if (active != null && !active.expiresAt.isAfter(DateTime.now())) {
+      _expire(active);
+      throw _sessionExpired;
     }
-
+    final uri = Uri.parse('$baseUrl$path').replace(queryParameters: query);
+    final headers = {
+      if (active != null) 'Authorization': 'Bearer ${active.token}',
+      if (body != null) 'Content-Type': 'application/json',
+    };
+    final payload = body == null ? null : jsonEncode(body);
     final http.Response response;
-
     try {
-      response = await http
-          .post(
-            Uri.parse('$baseUrl/api/forecasts'),
-            headers: {
-              'Authorization': 'Bearer $accessToken',
-              'Content-Type': 'application/json',
-            },
-            body: jsonEncode({'household_id': householdId}),
-          )
-          .timeout(const Duration(seconds: 30));
+      response = await (switch (method) {
+        'PUT' => http.put(uri, headers: headers, body: payload),
+        _ when body != null => http.post(uri, headers: headers, body: payload),
+        _ => http.get(uri, headers: headers),
+      }).timeout(timeout);
     } on TimeoutException {
       throw const ApiException(
         'The server took too long to respond. Please try again.',
       );
-    } catch (e) {
+    } on http.ClientException {
       throw const ApiException(
         'Could not reach the server. Check that the backend is running.',
       );
     }
-
-    if (response.statusCode < 200 || response.statusCode >= 300) {
-      throw _buildApiException(response);
+    final decoded = _decode(response.body);
+    if (response.statusCode >= 200 && response.statusCode < 300) {
+      if (decoded is Map<String, dynamic>) return decoded;
+      throw _unexpected;
     }
-
-    final dynamic decoded = _tryDecode(response.body);
-
-    if (decoded is! Map<String, dynamic>) {
-      throw const ApiException(
-        'The server sent an unexpected response. Please try again.',
+    final error = decoded is Map ? decoded['error'] : null;
+    final code = error is Map && error['code'] is String
+        ? error['code'] as String
+        : null;
+    final message = error is Map && error['message'] is String
+        ? error['message'] as String
+        : null;
+    if (response.statusCode == 401 && active != null) {
+      _expire(active);
+      throw ApiException(
+        _sessionExpired.message,
+        statusCode: 401,
+        code: code ?? _sessionExpired.code,
       );
     }
-
-    return ForecastResult.fromJson(decoded);
+    throw ApiException(
+      response.statusCode >= 500
+          ? 'The server had a problem. Please try again later.'
+          : message ?? 'The request failed (HTTP ${response.statusCode}).',
+      statusCode: response.statusCode,
+      code: code,
+    );
   }
 
-  // Handle successful responses and API errors.
-  static Map<String, dynamic> _handleResponse(http.Response response) {
-    final dynamic decoded = jsonDecode(response.body);
-
-    if (response.statusCode >= 200 && response.statusCode < 300) {
-      if (decoded is Map<String, dynamic>) {
-        return decoded;
-      }
-
-      return {'data': decoded};
-    }
-
-    throw Exception('API error (${response.statusCode}): ${response.body}');
-  }
-
-  // Turns a failed response into an [ApiException] with a friendly message.
-  // The backend sends errors as {"error": {"code": "...", "message": "..."}}.
-  static ApiException _buildApiException(http.Response response) {
-    String? code;
-    String? backendMessage;
-
-    final dynamic decoded = _tryDecode(response.body);
-
-    if (decoded is Map<String, dynamic>) {
-      final error = decoded['error'];
-
-      if (error is Map) {
-        code = error['code']?.toString();
-        backendMessage = error['message']?.toString();
-      }
-    }
-
-    final status = response.statusCode;
-    final String message;
-
-    if (status == 401) {
-      message = 'Your session has expired. Please log in again.';
-    } else if (status == 400) {
-      message =
-          backendMessage ??
-          'The request was not valid. Please check your entries.';
-    } else if (status == 403) {
-      message = backendMessage ?? 'You do not have access to this household.';
-    } else if (status == 404) {
-      message = backendMessage ?? 'The household was not found.';
-    } else if (status == 409) {
-      message =
-          backendMessage ?? 'A reading for this date has already been saved.';
-    } else if (status == 422) {
-      message = backendMessage ?? 'Some of the readings are not valid.';
-    } else if (status >= 500) {
-      message = 'The server had a problem. Please try again later.';
-    } else {
-      message = backendMessage ?? 'Something went wrong (error $status).';
-    }
-
-    return ApiException(message, statusCode: status, code: code);
-  }
-
-  // Decodes JSON without crashing if the body is empty or not JSON.
-  static dynamic _tryDecode(String body) {
+  static Object? _decode(String body) {
     try {
       return jsonDecode(body);
-    } catch (_) {
+    } on FormatException {
       return null;
     }
   }
 
-  // Turns a JSON number (or a numeric string) into a double.
-  // Returns null if the value is missing or not a number.
-  static double? _toDouble(dynamic value) {
-    if (value == null) return null;
-    if (value is num) return value.toDouble();
-    return double.tryParse('$value');
+  static T _parse<T>(T Function() parse) {
+    try {
+      return parse();
+    } on FormatException {
+      throw _unexpected;
+    } on TypeError {
+      throw _unexpected;
+    } on ArgumentError {
+      throw _unexpected;
+    }
   }
 
-  // Formats a date the way the backend expects, e.g. "2026-11-01".
-  static String _formatDate(DateTime date) {
-    final month = date.month.toString().padLeft(2, '0');
-    final day = date.day.toString().padLeft(2, '0');
-
-    return '${date.year}-$month-$day';
-  }
+  static String _formatDate(DateTime date) =>
+      '${date.year.toString().padLeft(4, '0')}-'
+      '${date.month.toString().padLeft(2, '0')}-'
+      '${date.day.toString().padLeft(2, '0')}';
 }

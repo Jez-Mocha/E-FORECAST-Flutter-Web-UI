@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../models/billing_data.dart';
 import '../models/household.dart';
 import '../services/api_service.dart';
 import '../theme/app_effects.dart';
@@ -12,10 +13,8 @@ import '../widgets/app_message.dart';
 import '../widgets/app_top_bar.dart';
 
 /// Record Consumption.
-/// Lets the user enter a date plus the previous and current meter readings
-/// for one household, then sends them to the backend. The backend works out
-/// the kWh used. When the screen opens, the previous reading is filled in
-/// from the household's last saved reading (the user can still edit it).
+/// Sends meter readings or the billed kWh for a month to the backend.
+/// The backend calculates kWh for meter readings using the saved baseline.
 /// On success the screen closes and returns `true`.
 class RecordConsumptionScreen extends StatefulWidget {
   final Household household;
@@ -27,28 +26,35 @@ class RecordConsumptionScreen extends StatefulWidget {
       _RecordConsumptionScreenState();
 }
 
+enum _RecordMode { meter, direct }
+
 class _RecordConsumptionScreenState extends State<RecordConsumptionScreen> {
   final _formKey = GlobalKey<FormState>();
   final _currentFieldKey = GlobalKey<FormFieldState<String>>();
 
   final _dateCtrl = TextEditingController();
+  final _previousDateCtrl = TextEditingController();
   final _previousCtrl = TextEditingController();
   final _currentCtrl = TextEditingController();
+  final _monthCtrl = TextEditingController();
+  final _directKwhCtrl = TextEditingController();
 
   // The date the user picked. Starts as today.
   late DateTime _selectedDate;
+  late DateTime _billingMonth;
+  DateTime? _previousDate;
+  _RecordMode _mode = _RecordMode.meter;
+  bool get _isMeter => _mode == _RecordMode.meter;
 
   // True while the reading is being sent (shows "Saving…").
   bool _isSaving = false;
+  bool _validateEdits = false;
 
   // True while the last saved reading is being loaded.
   bool _isLoadingPrevious = true;
 
-  // True if the previous reading was filled in from a saved reading.
-  bool _prefilled = false;
-
-  // True if the household was checked and has no saved readings yet.
-  bool _noSavedReadings = false;
+  MeterReading? _lastReading;
+  String? _historyError;
 
   // A message from the last failed save. Shown on the form until the next try.
   String? _submitError;
@@ -58,22 +64,25 @@ class _RecordConsumptionScreenState extends State<RecordConsumptionScreen> {
     super.initState();
     _selectedDate = _dateOnly(DateTime.now());
     _dateCtrl.text = _displayDate(_selectedDate);
+    _billingMonth = DateTime(_selectedDate.year, _selectedDate.month);
+    _monthCtrl.text = _displayMonth(_billingMonth);
     _loadPreviousReading();
   }
 
   @override
   void dispose() {
     _dateCtrl.dispose();
+    _previousDateCtrl.dispose();
     _previousCtrl.dispose();
     _currentCtrl.dispose();
+    _monthCtrl.dispose();
+    _directKwhCtrl.dispose();
     super.dispose();
   }
 
   // ── Actions ───────────────────────────────────────────────────────────────
 
-  /// Looks up the household's last saved reading and fills in the previous
-  /// reading field. The field always stays editable. If anything goes wrong
-  /// the user can simply type the value.
+  /// Loads the baseline before allowing submission in Meter Reading mode.
   Future<void> _loadPreviousReading() async {
     final householdId = widget.household.id;
 
@@ -83,44 +92,37 @@ class _RecordConsumptionScreenState extends State<RecordConsumptionScreen> {
       return;
     }
 
+    setState(() {
+      _isLoadingPrevious = true;
+      _historyError = null;
+    });
     try {
-      final last = await ApiService.getLastMeterReading(householdId);
+      final last = await ApiService.getLatestMeterReading(householdId);
 
       if (!mounted) return;
 
       setState(() {
         _isLoadingPrevious = false;
 
-        if (last == null) {
-          _noSavedReadings = true;
-          return;
-        }
-
-        // Do not overwrite anything the user already typed or started saving.
-        if (_previousCtrl.text.trim().isEmpty && !_isSaving) {
-          _previousCtrl.text = last.toStringAsFixed(2);
-          _prefilled = true;
+        _lastReading = last;
+        if (last != null) {
+          _previousCtrl.text = last.value.toStringAsFixed(2);
+          _previousDate = last.date;
+          _previousDateCtrl.text = _displayDate(last.date);
         }
       });
     } on ApiException catch (e) {
       if (!mounted) return;
-      setState(() => _isLoadingPrevious = false);
-
-      showTemporaryMessage(
-        context,
-        e.isSessionExpired
-            ? e.message
-            : 'Could not load your last meter reading. '
-                  'You can type it in yourself.',
-      );
+      setState(() {
+        _isLoadingPrevious = false;
+        _historyError = e.message;
+      });
     } catch (_) {
       if (!mounted) return;
-      setState(() => _isLoadingPrevious = false);
-
-      showTemporaryMessage(
-        context,
-        'Could not load your last meter reading. You can type it in yourself.',
-      );
+      setState(() {
+        _isLoadingPrevious = false;
+        _historyError = 'Could not load your last meter reading.';
+      });
     }
   }
 
@@ -145,6 +147,44 @@ class _RecordConsumptionScreenState extends State<RecordConsumptionScreen> {
     });
   }
 
+  Future<void> _pickPreviousDate() async {
+    final latestAllowed = DateTime(
+      _selectedDate.year,
+      _selectedDate.month,
+      _selectedDate.day - 1,
+    );
+    final previous = _previousDate;
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: previous != null && !previous.isAfter(latestAllowed)
+          ? previous
+          : latestAllowed,
+      firstDate: DateTime(1900),
+      lastDate: latestAllowed,
+      helpText: 'Select previous reading date',
+    );
+    if (picked == null || !mounted) return;
+    setState(() {
+      _previousDate = _dateOnly(picked);
+      _previousDateCtrl.text = _displayDate(_previousDate!);
+    });
+  }
+
+  Future<void> _pickBillingMonth() async {
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: _billingMonth,
+      firstDate: DateTime(1900),
+      lastDate: _dateOnly(DateTime.now()),
+      helpText: 'Select a date in the billing month',
+    );
+    if (picked == null || !mounted) return;
+    setState(() {
+      _billingMonth = DateTime(picked.year, picked.month);
+      _monthCtrl.text = _displayMonth(_billingMonth);
+    });
+  }
+
   /// When the previous reading changes, re-check the current reading (it must
   /// be higher), but only if the user has already typed something there.
   void _onPreviousChanged(String _) {
@@ -156,10 +196,11 @@ class _RecordConsumptionScreenState extends State<RecordConsumptionScreen> {
   /// Checks the form, sends the reading to the backend and handles the result.
   Future<void> _submit() async {
     // Stops double taps and a second Enter key press while saving.
-    if (_isSaving) return;
+    if (_isSaving || (_isMeter && _meterHistoryPending)) return;
+    if (!_validateEdits) setState(() => _validateEdits = true);
     if (!(_formKey.currentState?.validate() ?? false)) return;
 
-    // Households added only inside the app have no server id yet.
+    // Sample or unsaved households have no server ID.
     final householdId = widget.household.id;
     if (householdId == null) {
       setState(() {
@@ -170,29 +211,35 @@ class _RecordConsumptionScreenState extends State<RecordConsumptionScreen> {
       return;
     }
 
-    final previous = double.parse(_previousCtrl.text.trim());
-    final current = double.parse(_currentCtrl.text.trim());
-
     setState(() {
       _isSaving = true;
       _submitError = null;
     });
 
     try {
-      final result = await ApiService.recordConsumption(
-        householdId: householdId,
-        consumptionDate: _selectedDate,
-        meterPrevious: previous,
-        meterCurrent: current,
-      );
+      final double? kwh;
+      if (_isMeter) {
+        final result = await ApiService.recordConsumption(
+          householdId: householdId,
+          consumptionDate: _selectedDate,
+          previousReadingDate: _previousDate!,
+          meterPrevious: double.parse(_previousCtrl.text.trim()),
+          meterCurrent: double.parse(_currentCtrl.text.trim()),
+        );
+        final savedKwh = result['kwh'];
+        kwh = savedKwh is num
+            ? savedKwh.toDouble()
+            : double.tryParse('$savedKwh');
+      } else {
+        final result = await ApiService.recordMonthlyConsumption(
+          householdId: householdId,
+          billingMonth: _billingMonth,
+          consumptionKwh: double.parse(_directKwhCtrl.text.trim()),
+        );
+        kwh = result.kwh;
+      }
 
       if (!mounted) return;
-
-      // The backend returns the kWh it calculated.
-      final kwhValue = result['kwh'];
-      final kwh = kwhValue is num
-          ? kwhValue.toDouble()
-          : double.tryParse('$kwhValue');
 
       // Confirm the save with the shared centered popup, then go back.
       // The form stays disabled while the popup is open.
@@ -214,6 +261,12 @@ class _RecordConsumptionScreenState extends State<RecordConsumptionScreen> {
         _isSaving = false;
         _submitError = e.message;
       });
+      if (_isMeter &&
+          (e.code == 'METER_SEQUENCE_MISMATCH' ||
+              e.code == 'DUPLICATE_CONSUMPTION_RECORD' ||
+              e.code == 'INVALID_READING_DATE')) {
+        await _loadPreviousReading();
+      }
     } catch (_) {
       if (!mounted) return;
       setState(() {
@@ -290,8 +343,11 @@ class _RecordConsumptionScreenState extends State<RecordConsumptionScreen> {
         ),
         const SizedBox(height: 6),
         Text(
-          'Enter the readings from your electricity meter for '
-          '${widget.household.name}.',
+          _isMeter
+              ? 'Enter the readings from your electricity meter for '
+                    '${widget.household.name}.'
+              : 'Enter the monthly kWh from the bill for '
+                    '${widget.household.name}.',
           style: TextStyle(
             color: LandingColors.textSecondary,
             fontSize: AppText.body + 1,
@@ -308,14 +364,11 @@ class _RecordConsumptionScreenState extends State<RecordConsumptionScreen> {
   /// happened with the automatic fill-in.
   String get _previousHelper {
     if (_isLoadingPrevious) return 'Loading your last saved reading…';
-    if (_prefilled) {
-      return 'Filled in from your last saved reading. You can change it.';
-    }
-    if (_noSavedReadings) {
-      return 'No saved readings yet. Enter the reading you want to start from.';
-    }
-    return 'The last reading you recorded';
+    if (_lastReading != null) return 'From your last saved reading';
+    return 'Enter the reading you want to start from';
   }
+
+  bool get _meterHistoryPending => _isLoadingPrevious || _historyError != null;
 
   Widget _buildFormCard() {
     return GlassCard(
@@ -323,95 +376,30 @@ class _RecordConsumptionScreenState extends State<RecordConsumptionScreen> {
       padding: const EdgeInsets.fromLTRB(28, 26, 28, 28),
       child: Form(
         key: _formKey,
-        // Errors appear after the user has interacted with a field.
-        autovalidateMode: AutovalidateMode.onUserInteraction,
+        // Prefilling saved values must not show errors before the user submits.
+        autovalidateMode: _validateEdits
+            ? AutovalidateMode.onUserInteraction
+            : AutovalidateMode.disabled,
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            const _StepHeader(
-              number: 1,
-              title: 'Reading date',
-              subtitle: 'Choose the day you read the meter.',
-            ),
-            const SizedBox(height: 14),
             Align(
               alignment: Alignment.centerLeft,
-              child: ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 320),
-                child: MouseRegion(
-                  cursor: _isSaving
-                      ? SystemMouseCursors.basic
-                      : SystemMouseCursors.click,
-                  child: TextFormField(
-                    controller: _dateCtrl,
-                    readOnly: true,
-                    onTap: _isSaving ? null : _pickDate,
-                    validator: (v) => (v == null || v.trim().isEmpty)
-                        ? 'Choose the date of the reading'
-                        : null,
-                    style: TextStyle(
-                      color: LandingColors.textPrimary,
-                      fontSize: AppText.body,
-                    ),
-                    decoration: InputDecoration(
-                      labelText: 'Consumption date',
-                      prefixIcon: Icon(
-                        Icons.event_outlined,
-                        size: 18,
-                        color: LandingColors.textSecondary,
-                      ),
-                      suffixIcon: Icon(
-                        Icons.calendar_month_outlined,
-                        size: 18,
-                        color: LandingColors.primary,
-                      ),
-                    ),
-                  ),
+              child: IgnorePointer(
+                ignoring: _isSaving,
+                child: AppPillTabs(
+                  labels: const ['Meter Reading', 'Direct kWh'],
+                  selected: _mode.index,
+                  onChanged: (index) => setState(() {
+                    _mode = _RecordMode.values[index];
+                    _validateEdits = false;
+                    _submitError = null;
+                  }),
                 ),
               ),
             ),
-            const SizedBox(height: 26),
-            Divider(color: LandingColors.border, height: 1),
             const SizedBox(height: 22),
-            const _StepHeader(
-              number: 2,
-              title: 'Meter readings',
-              subtitle:
-                  'Type the numbers shown on your meter. The current reading '
-                  'must be higher than the previous one.',
-            ),
-            const SizedBox(height: 14),
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Expanded(
-                  child: _meterField(
-                    controller: _previousCtrl,
-                    label: 'Previous meter reading',
-                    hint: 'e.g. 211.00',
-                    helper: _previousHelper,
-                    icon: Icons.speed_outlined,
-                    validator: _validatePrevious,
-                    onChanged: _onPreviousChanged,
-                  ),
-                ),
-                const SizedBox(width: 16),
-                Expanded(
-                  child: _meterField(
-                    fieldKey: _currentFieldKey,
-                    controller: _currentCtrl,
-                    label: 'Current meter reading',
-                    hint: 'e.g. 223.50',
-                    helper: 'The reading on your meter now',
-                    icon: Icons.bolt_rounded,
-                    validator: _validateCurrent,
-                    last: true,
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 22),
-            _buildUsagePreview(),
+            if (_isMeter) ..._meterFields() else ..._directFields(),
             if (_submitError != null) ...[
               const SizedBox(height: 16),
               _ErrorBanner(message: _submitError!),
@@ -430,7 +418,9 @@ class _RecordConsumptionScreenState extends State<RecordConsumptionScreen> {
                 ),
                 const SizedBox(width: 12),
                 ElevatedButton.icon(
-                  onPressed: _isSaving ? null : _submit,
+                  onPressed: _isSaving || (_isMeter && _meterHistoryPending)
+                      ? null
+                      : _submit,
                   style: ElevatedButton.styleFrom(
                     minimumSize: const Size(0, 52),
                     padding: const EdgeInsets.symmetric(horizontal: 28),
@@ -455,6 +445,186 @@ class _RecordConsumptionScreenState extends State<RecordConsumptionScreen> {
             ),
           ],
         ),
+      ),
+    );
+  }
+
+  List<Widget> _meterFields() => [
+    const _StepHeader(
+      number: 1,
+      title: 'Reading dates',
+      subtitle: 'Choose the day you read the meter.',
+    ),
+    const SizedBox(height: 14),
+    _readingFields(
+      _dateField(
+        controller: _dateCtrl,
+        label: 'Consumption date',
+        onTap: _pickDate,
+        validator: (_) {
+          final lastDate = _lastReading?.date;
+          if (lastDate != null && !_selectedDate.isAfter(lastDate)) {
+            return 'Choose a date after ${_displayDate(lastDate)}';
+          }
+          return null;
+        },
+      ),
+      _dateField(
+        controller: _previousDateCtrl,
+        label: 'Previous reading date',
+        onTap: _meterHistoryPending || _lastReading != null
+            ? null
+            : _pickPreviousDate,
+        validator: (_) {
+          if (_lastReading != null) return null;
+          final previous = _previousDate;
+          if (previous == null) return 'Choose the previous reading date';
+          if (!previous.isBefore(_selectedDate)) {
+            return 'Must be before the consumption date';
+          }
+          return null;
+        },
+      ),
+    ),
+    if (_historyError case final error?) ...[
+      const SizedBox(height: 14),
+      _ErrorBanner(message: error),
+      Align(
+        alignment: Alignment.centerLeft,
+        child: TextButton(
+          onPressed: _loadPreviousReading,
+          child: const Text('Retry meter history'),
+        ),
+      ),
+    ],
+    ..._sectionDivider(),
+    const _StepHeader(
+      number: 2,
+      title: 'Meter readings',
+      subtitle:
+          'Type the numbers shown on your meter. The current reading '
+          'must be higher than the previous one.',
+    ),
+    const SizedBox(height: 14),
+    _readingFields(
+      _meterField(
+        controller: _previousCtrl,
+        label: 'Previous meter reading',
+        hint: 'e.g. 211.00',
+        helper: _previousHelper,
+        icon: Icons.speed_outlined,
+        validator: _validatePrevious,
+        onChanged: _onPreviousChanged,
+        readOnly: _meterHistoryPending || _lastReading != null,
+      ),
+      _meterField(
+        fieldKey: _currentFieldKey,
+        controller: _currentCtrl,
+        label: 'Current meter reading',
+        hint: 'e.g. 223.50',
+        helper: 'The reading on your meter now',
+        icon: Icons.bolt_rounded,
+        validator: _validateCurrent,
+        last: true,
+      ),
+    ),
+    const SizedBox(height: 22),
+    _buildUsagePreview(),
+  ];
+
+  List<Widget> _directFields() => [
+    const _StepHeader(
+      number: 1,
+      title: 'Billing month',
+      subtitle: 'Choose the month shown on your electricity bill.',
+    ),
+    const SizedBox(height: 14),
+    Align(
+      alignment: Alignment.centerLeft,
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 320),
+        child: _dateField(
+          controller: _monthCtrl,
+          label: 'Billing month',
+          onTap: _pickBillingMonth,
+        ),
+      ),
+    ),
+    ..._sectionDivider(),
+    const _StepHeader(
+      number: 2,
+      title: 'Billed consumption',
+      subtitle: 'Enter the total kWh for the billing month.',
+    ),
+    const SizedBox(height: 14),
+    _meterField(
+      controller: _directKwhCtrl,
+      label: 'Consumption in kWh',
+      hint: 'e.g. 125.50',
+      helper: 'Total consumption shown on your bill',
+      icon: Icons.bolt_rounded,
+      validator: _validateDirectKwh,
+      last: true,
+    ),
+  ];
+
+  List<Widget> _sectionDivider() => [
+    const SizedBox(height: 26),
+    Divider(color: LandingColors.border, height: 1),
+    const SizedBox(height: 22),
+  ];
+
+  Widget _readingFields(Widget first, Widget second) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        if (constraints.maxWidth < 480) {
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [first, const SizedBox(height: 14), second],
+          );
+        }
+        return Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(child: first),
+            const SizedBox(width: 16),
+            Expanded(child: second),
+          ],
+        );
+      },
+    );
+  }
+
+  Widget _dateField({
+    required TextEditingController controller,
+    required String label,
+    required VoidCallback? onTap,
+    String? Function(String?)? validator,
+  }) {
+    return TextFormField(
+      controller: controller,
+      readOnly: true,
+      canRequestFocus: onTap != null && !_isSaving,
+      onTap: _isSaving ? null : onTap,
+      validator: validator,
+      style: TextStyle(
+        color: LandingColors.textPrimary,
+        fontSize: AppText.body,
+      ),
+      decoration: InputDecoration(
+        labelText: label,
+        prefixIcon: Icon(
+          Icons.event_outlined,
+          size: 18,
+          color: LandingColors.textSecondary,
+        ),
+        suffixIcon: onTap == null
+            ? null
+            : Icon(
+                Icons.calendar_month_outlined,
+                size: 18,
+                color: LandingColors.primary,
+              ),
       ),
     );
   }
@@ -542,6 +712,7 @@ class _RecordConsumptionScreenState extends State<RecordConsumptionScreen> {
     required String? Function(String?) validator,
     GlobalKey<FormFieldState<String>>? fieldKey,
     ValueChanged<String>? onChanged,
+    bool readOnly = false,
     bool last = false,
   }) {
     return TextFormField(
@@ -550,6 +721,7 @@ class _RecordConsumptionScreenState extends State<RecordConsumptionScreen> {
       validator: validator,
       onChanged: onChanged,
       enabled: !_isSaving,
+      readOnly: readOnly,
       keyboardType: const TextInputType.numberWithOptions(decimal: true),
       inputFormatters: [
         FilteringTextInputFormatter.allow(RegExp(r'^\d*\.?\d{0,2}')),
@@ -637,7 +809,9 @@ class _RecordConsumptionScreenState extends State<RecordConsumptionScreen> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                'Tips for accurate readings',
+                _isMeter
+                    ? 'Tips for accurate readings'
+                    : 'Tips for bill entries',
                 style: TextStyle(
                   color: LandingColors.textPrimary,
                   fontSize: AppText.cardTitle,
@@ -645,17 +819,18 @@ class _RecordConsumptionScreenState extends State<RecordConsumptionScreen> {
                 ),
               ),
               const SizedBox(height: 12),
-              const _Tip(
-                text: 'Use the number shown on your electricity meter.',
-              ),
-              const _Tip(
-                text:
-                    'The previous reading is your last saved one. Change it '
-                    'if it is not correct.',
-              ),
-              const _Tip(
-                text: 'The current reading must be higher than the previous.',
-              ),
+              if (_isMeter) ...const [
+                _Tip(text: 'Use the number shown on your electricity meter.'),
+                _Tip(
+                  text: 'The previous value and date come from your last saved reading.',
+                ),
+                _Tip(
+                  text: 'The current reading must be higher than the previous.',
+                ),
+              ] else ...const [
+                _Tip(text: 'Use the billed kWh total for the selected month.'),
+                _Tip(text: 'Only one Direct kWh entry can be saved per month.'),
+              ],
               const _Tip(text: 'You can use up to 2 decimal places.'),
             ],
           ),
@@ -673,6 +848,9 @@ class _RecordConsumptionScreenState extends State<RecordConsumptionScreen> {
     final number = double.tryParse(text);
     if (number == null) return 'Enter a valid number, e.g. 211.00';
     if (number < 0) return 'Reading cannot be negative';
+    if (!number.isFinite || number > 9_999_999_999.99) {
+      return 'Reading exceeds the supported range';
+    }
     return null;
   }
 
@@ -683,6 +861,9 @@ class _RecordConsumptionScreenState extends State<RecordConsumptionScreen> {
     final current = double.tryParse(text);
     if (current == null) return 'Enter a valid number, e.g. 223.50';
     if (current < 0) return 'Reading cannot be negative';
+    if (!current.isFinite || current > 9_999_999_999.99) {
+      return 'Reading exceeds the supported range';
+    }
 
     // The current reading must be higher than the previous one.
     final previous = double.tryParse(_previousCtrl.text.trim());
@@ -690,6 +871,20 @@ class _RecordConsumptionScreenState extends State<RecordConsumptionScreen> {
       return 'Must be higher than the previous reading '
           '(${previous.toStringAsFixed(2)})';
     }
+    if (previous != null &&
+        previous.isFinite &&
+        ((current - previous) * 100).round() > 9_999_999_999) {
+      return 'Consumption exceeds the supported range';
+    }
+    return null;
+  }
+
+  String? _validateDirectKwh(String? value) {
+    final kwh = double.tryParse(value?.trim() ?? '');
+    if (kwh == null || !kwh.isFinite || kwh < 0.01) {
+      return 'Enter a consumption total of at least 0.01 kWh';
+    }
+    if (kwh > 99_999_999.99) return 'Consumption exceeds the supported range';
     return null;
   }
 
@@ -698,24 +893,26 @@ class _RecordConsumptionScreenState extends State<RecordConsumptionScreen> {
   /// Removes the time part so only the day is kept.
   DateTime _dateOnly(DateTime d) => DateTime(d.year, d.month, d.day);
 
+  static const _months = [
+    'Jan',
+    'Feb',
+    'Mar',
+    'Apr',
+    'May',
+    'Jun',
+    'Jul',
+    'Aug',
+    'Sep',
+    'Oct',
+    'Nov',
+    'Dec',
+  ];
+
   /// Friendly format for the screen, e.g. "Nov 1, 2026".
-  String _displayDate(DateTime d) {
-    const months = [
-      'Jan',
-      'Feb',
-      'Mar',
-      'Apr',
-      'May',
-      'Jun',
-      'Jul',
-      'Aug',
-      'Sep',
-      'Oct',
-      'Nov',
-      'Dec',
-    ];
-    return '${months[d.month - 1]} ${d.day}, ${d.year}';
-  }
+  String _displayDate(DateTime d) =>
+      '${_months[d.month - 1]} ${d.day}, ${d.year}';
+
+  String _displayMonth(DateTime d) => '${_months[d.month - 1]} ${d.year}';
 }
 
 // ── Small building blocks ───────────────────────────────────────────────────

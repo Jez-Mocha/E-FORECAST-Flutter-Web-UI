@@ -7,6 +7,7 @@ import '../landing/landing_widgets.dart'
         LandingContainer,
         LandingPrimaryButton,
         LandingSecondaryButton;
+import '../models/electricity_provider.dart';
 import '../models/household.dart';
 import '../services/api_service.dart';
 import '../theme/app_theme.dart';
@@ -36,9 +37,8 @@ class _AddHouseholdScreenState extends State<AddHouseholdScreen> {
   final _streetCtrl = TextEditingController();
   final _cityCtrl = TextEditingController();
   final _occupantsCtrl = TextEditingController();
-  final _providerCtrl = TextEditingController();
-  final _rateCtrl = TextEditingController();
   final _billingDayCtrl = TextEditingController();
+  String? _providerCode;
 
   // True while the household is being saved on the server.
   bool _isSaving = false;
@@ -50,8 +50,6 @@ class _AddHouseholdScreenState extends State<AddHouseholdScreen> {
     _streetCtrl.dispose();
     _cityCtrl.dispose();
     _occupantsCtrl.dispose();
-    _providerCtrl.dispose();
-    _rateCtrl.dispose();
     _billingDayCtrl.dispose();
     super.dispose();
   }
@@ -73,35 +71,16 @@ class _AddHouseholdScreenState extends State<AddHouseholdScreen> {
     setState(() => _isSaving = true);
 
     try {
-      final result = await ApiService.createHousehold(
+      final household = await ApiService.createHousehold(
         householdName: name,
         address: '$street, $city',
         meterNumber: meter,
+        occupants: int.parse(_occupantsCtrl.text.trim()),
+        electricityProvider: _providerCode!,
+        billingCycleDay: int.parse(_billingDayCtrl.text.trim()),
       );
-
-      // The server must confirm with a household ID.
-      final id = int.tryParse('${result['household_id'] ?? ''}');
-      if (id == null) {
-        throw const ApiException(
-          'The server did not confirm the household. Please try again.',
-        );
-      }
-
       if (!mounted) return;
-
-      Navigator.of(context).pop(
-        Household(
-          id: id,
-          name: name,
-          street: street,
-          city: city,
-          occupants: int.parse(_occupantsCtrl.text.trim()),
-          provider: _providerCtrl.text.trim(),
-          ratePerKwh: double.parse(_rateCtrl.text.trim()),
-          billingCycleDay: int.parse(_billingDayCtrl.text.trim()),
-          meterNumber: meter,
-        ),
-      );
+      Navigator.of(context).pop(household);
     } on ApiException catch (e) {
       // Friendly message. The user stays on the form to fix it.
       if (!mounted) return;
@@ -155,9 +134,8 @@ class _AddHouseholdScreenState extends State<AddHouseholdScreen> {
                         ),
                         const SizedBox(height: 16),
                         Text(
-                          'The household name, address and meter number are '
-                          'saved to your account. The other details are kept '
-                          'for this session only.',
+                          'Open the household after saving to see its current '
+                          'electricity rate.',
                           style: TextStyle(
                             color: LandingColors.textSecondary,
                             fontSize: 12,
@@ -270,33 +248,23 @@ class _AddHouseholdScreenState extends State<AddHouseholdScreen> {
                     max: 50,
                   ),
                 ),
-                _field(
-                  controller: _providerCtrl,
-                  label: 'Electricity Provider',
-                  icon: Icons.bolt_rounded,
-                  capitalization: TextCapitalization.words,
-                  validator: (v) =>
-                      _validateRequired(v, 'Electricity provider'),
-                ),
+                _providerField(),
               ),
               const SizedBox(height: 16),
               _fieldRow(
                 twoCol,
-                _field(
-                  controller: _rateCtrl,
-                  label: 'Rate per kWh (₱)',
-                  hint: 'e.g. 12.50',
-                  helper: 'Price per kWh on your bill',
-                  icon: Icons.payments_outlined,
-                  keyboardType: const TextInputType.numberWithOptions(
-                    decimal: true,
-                  ),
-                  formatters: [
-                    FilteringTextInputFormatter.allow(
-                      RegExp(r'^\d*\.?\d{0,4}'),
+                InputDecorator(
+                  decoration: InputDecoration(
+                    labelText: 'Rate per kWh (₱)',
+                    helperText: 'Managed by the administrator',
+                    helperMaxLines: 2,
+                    prefixIcon: Icon(
+                      Icons.payments_outlined,
+                      size: 18,
+                      color: LandingColors.textSecondary,
                     ),
-                  ],
-                  validator: _validateRate,
+                  ),
+                  child: const Text('Available after saving'),
                 ),
                 _field(
                   controller: _billingDayCtrl,
@@ -346,6 +314,32 @@ class _AddHouseholdScreenState extends State<AddHouseholdScreen> {
           );
         },
       ),
+    );
+  }
+
+  Widget _providerField() {
+    return DropdownButtonFormField<String>(
+      initialValue: _providerCode,
+      isExpanded: true,
+      menuMaxHeight: 320,
+      style: TextStyle(color: LandingColors.textPrimary, fontSize: 14),
+      decoration: InputDecoration(
+        labelText: 'Electricity Provider',
+        prefixIcon: Icon(
+          Icons.bolt_rounded,
+          size: 18,
+          color: LandingColors.textSecondary,
+        ),
+      ),
+      items: [
+        for (final provider in mindanaoElectricityProviders)
+          DropdownMenuItem(
+            value: provider.code,
+            child: Text(provider.label, overflow: TextOverflow.ellipsis),
+          ),
+      ],
+      onChanged: _isSaving ? null : (value) => _providerCode = value,
+      validator: (value) => _validateRequired(value, 'Electricity provider'),
     );
   }
 
@@ -449,15 +443,5 @@ String? _validateWholeNumber(
   if (number < 1 || number < min || number > max) {
     return 'Enter a number from $min to $max';
   }
-  return null;
-}
-
-/// A number greater than 0, such as 12.5 (decimals allowed).
-String? _validateRate(String? value) {
-  final text = value?.trim() ?? '';
-  if (text.isEmpty) return 'Rate per kWh is required';
-  final rate = double.tryParse(text);
-  if (rate == null) return 'Enter a valid number, e.g. 12.50';
-  if (rate <= 0) return 'Rate must be greater than 0';
   return null;
 }

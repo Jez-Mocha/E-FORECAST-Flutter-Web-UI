@@ -1,15 +1,23 @@
 import 'package:flutter/material.dart';
 
+import '../models/auth_session.dart';
+import '../services/api_service.dart';
 import '../theme/app_colors.dart'; // only for status colors (error / success)
 import '../theme/app_effects.dart';
 import '../theme/landing_colors.dart';
-import 'dashboard_screen.dart';
-import '../services/api_service.dart';
 import '../widgets/app_message.dart';
+import 'admin_dashboard_screen.dart';
+import 'dashboard_screen.dart';
+import 'home_screen.dart';
 
 class LoginScreen extends StatefulWidget {
   final int initialTab;
-  const LoginScreen({super.key, this.initialTab = 0});
+  final bool sessionExpired;
+  const LoginScreen({
+    super.key,
+    this.initialTab = 0,
+    this.sessionExpired = false,
+  });
 
   @override
   State<LoginScreen> createState() => _LoginScreenState();
@@ -20,11 +28,11 @@ class _LoginScreenState extends State<LoginScreen>
   late TabController _tab;
 
   // Sign-in controllers
-  final _signInEmailCtrl = TextEditingController();
+  final _signInIdentifierCtrl = TextEditingController();
   final _signInPassCtrl = TextEditingController();
 
   // Register controllers
-  final _regNameCtrl = TextEditingController();
+  final _regUsernameCtrl = TextEditingController();
   final _regEmailCtrl = TextEditingController();
   final _regPassCtrl = TextEditingController();
   final _regConfirmPassCtrl = TextEditingController();
@@ -41,6 +49,16 @@ class _LoginScreenState extends State<LoginScreen>
   @override
   void initState() {
     super.initState();
+    if (widget.sessionExpired) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          _showSnackbar(
+            'Your session has expired. Please sign in again.',
+            isError: true,
+          );
+        }
+      });
+    }
     _tab = TabController(
       length: 2,
       vsync: this,
@@ -51,9 +69,9 @@ class _LoginScreenState extends State<LoginScreen>
   @override
   void dispose() {
     _tab.dispose();
-    _signInEmailCtrl.dispose();
+    _signInIdentifierCtrl.dispose();
     _signInPassCtrl.dispose();
-    _regNameCtrl.dispose();
+    _regUsernameCtrl.dispose();
     _regEmailCtrl.dispose();
     _regPassCtrl.dispose();
     _regConfirmPassCtrl.dispose();
@@ -144,10 +162,11 @@ class _LoginScreenState extends State<LoginScreen>
   }
 
   Future<void> _submitSignIn() async {
-    final email = _signInEmailCtrl.text.trim();
+    if (_loading) return;
+    final identifier = _signInIdentifierCtrl.text.trim();
     final password = _signInPassCtrl.text;
 
-    if (email.isEmpty || password.isEmpty) {
+    if (identifier.isEmpty || password.isEmpty) {
       _showSnackbar('Please fill in all fields.', isError: true);
       return;
     }
@@ -155,21 +174,23 @@ class _LoginScreenState extends State<LoginScreen>
     setState(() => _loading = true);
 
     try {
-      await ApiService.login(usernameOrEmail: email, password: password);
+      final session = await ApiService.login(
+        usernameOrEmail: identifier,
+        password: password,
+      );
+      if (!_continueSignIn(session)) return;
       await ThemeController.loadForCurrentUser();
 
-      if (!mounted) return;
-
-      setState(() => _loading = false);
+      if (!_continueSignIn(session) || !mounted) return;
 
       // Centered success popup. The dashboard opens after it closes.
       await showSuccessPopup(context, message: 'Login successful!');
 
-      if (!mounted) return;
+      if (!_continueSignIn(session) || !mounted) return;
 
       Navigator.pushReplacement(
         context,
-        MaterialPageRoute(builder: (context) => const DashboardScreen()),
+        MaterialPageRoute(builder: (_) => _destination(session.role)),
       );
     } catch (e) {
       if (!mounted) return;
@@ -177,14 +198,15 @@ class _LoginScreenState extends State<LoginScreen>
       setState(() => _loading = false);
 
       _showSnackbar(
-        'Login failed. Check your username/email and password.',
+        e is ApiException ? e.message : 'Sign-in failed. Please try again.',
         isError: true,
       );
     }
   }
 
   Future<void> _submitRegister() async {
-    final username = _regNameCtrl.text.trim();
+    if (_loading) return;
+    final username = _regUsernameCtrl.text.trim();
     final email = _regEmailCtrl.text.trim();
     final password = _regPassCtrl.text;
     final confirm = _regConfirmPassCtrl.text;
@@ -194,6 +216,22 @@ class _LoginScreenState extends State<LoginScreen>
         password.isEmpty ||
         confirm.isEmpty) {
       _showSnackbar('Please fill in all fields.', isError: true);
+      return;
+    }
+
+    if (username.length < 3 || username.length > 50) {
+      _showSnackbar('Username must be 3–50 characters.', isError: true);
+      return;
+    }
+    if (!RegExp(
+      r'^[^@\s]+@gmail\.com$',
+      caseSensitive: false,
+    ).hasMatch(email)) {
+      _showSnackbar('Enter a valid Gmail address.', isError: true);
+      return;
+    }
+    if (password.length < 8) {
+      _showSnackbar('Password must be at least 8 characters.', isError: true);
       return;
     }
 
@@ -208,36 +246,47 @@ class _LoginScreenState extends State<LoginScreen>
     });
 
     try {
-      await ApiService.register(
+      final session = await ApiService.register(
         username: username,
         email: email,
         password: password,
       );
+      if (!_continueSignIn(session)) return;
       await ThemeController.loadForCurrentUser();
 
-      if (!mounted) return;
+      if (!_continueSignIn(session) || !mounted) return;
 
       setState(() => _loading = false);
       _showSnackbar('Account created successfully!');
 
-      _openDashboard();
+      Navigator.of(context).pushAndRemoveUntil(
+        MaterialPageRoute(builder: (_) => _destination(session.role)),
+        (route) => false,
+      );
     } catch (e) {
       if (!mounted) return;
 
       setState(() => _loading = false);
       _showSnackbar(
-        'Registration failed. The username or email may already exist.',
+        e is ApiException
+            ? e.message
+            : 'Registration failed. Please try again.',
         isError: true,
       );
     }
   }
 
-  void _openDashboard() {
-    Navigator.of(context).pushAndRemoveUntil(
-      MaterialPageRoute(builder: (_) => const DashboardScreen()),
-      (route) => false,
-    );
+  bool _continueSignIn(AuthSession session) {
+    if (!identical(ApiService.session, session)) return false;
+    if (mounted) return true;
+    ApiService.logout();
+    return false;
   }
+
+  Widget _destination(AccountRole role) => switch (role) {
+    AccountRole.admin => const AdminDashboardScreen(),
+    AccountRole.household => const DashboardScreen(),
+  };
 
   // ── build ─────────────────────────────────────────────────────────────────
 
@@ -437,7 +486,16 @@ class _LoginScreenState extends State<LoginScreen>
     return Align(
       alignment: Alignment.centerLeft,
       child: TextButton.icon(
-        onPressed: () => Navigator.maybePop(context),
+        onPressed: () {
+          final navigator = Navigator.of(context);
+          if (widget.sessionExpired && !navigator.canPop()) {
+            navigator.pushReplacement(
+              MaterialPageRoute(builder: (_) => const HomeScreen()),
+            );
+          } else {
+            navigator.maybePop();
+          }
+        },
         icon: const Icon(Icons.arrow_back_rounded, size: 16),
         label: const Text('Back to home'),
         style: TextButton.styleFrom(
@@ -554,9 +612,9 @@ class _LoginScreenState extends State<LoginScreen>
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         _buildField(
-          controller: _signInEmailCtrl,
-          label: 'Email Address',
-          hint: 'you@example.com',
+          controller: _signInIdentifierCtrl,
+          label: 'Email or Username',
+          hint: 'Enter your email or username',
           icon: Icons.mail_outline_rounded,
           keyboardType: TextInputType.emailAddress,
         ),
@@ -588,16 +646,16 @@ class _LoginScreenState extends State<LoginScreen>
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         _buildField(
-          controller: _regNameCtrl,
-          label: 'Full Name',
-          hint: 'Juan dela Cruz',
+          controller: _regUsernameCtrl,
+          label: 'Username',
+          hint: 'Enter a username',
           icon: Icons.person_outline_rounded,
         ),
         const SizedBox(height: 14),
         _buildField(
           controller: _regEmailCtrl,
           label: 'Email Address',
-          hint: 'you@example.com',
+          hint: 'you@gmail.com',
           icon: Icons.mail_outline_rounded,
           keyboardType: TextInputType.emailAddress,
         ),
