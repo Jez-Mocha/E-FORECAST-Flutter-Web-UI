@@ -134,6 +134,24 @@ class ApiService {
     return household;
   }
 
+  static Future<Household> updateHouseholdBilling({
+    required int householdId,
+    required String electricityProvider,
+    required int billingCycleDay,
+  }) async {
+    final result = await _request(
+      '/api/households/$householdId/billing',
+      method: 'PUT',
+      body: {
+        'electricity_provider': electricityProvider,
+        'billing_cycle_day': billingCycleDay,
+      },
+    );
+    final household = _parse(() => Household.fromJson(result));
+    if (household.id != householdId) throw _unexpected;
+    return household;
+  }
+
   static Future<MeterReading?> getLatestMeterReading(int householdId) async {
     final result = await _request(
       '/api/consumption/latest-meter',

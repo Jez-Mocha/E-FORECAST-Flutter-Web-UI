@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
-import '../landing/landing_widgets.dart' show SampleDataChip;
+import '../landing/landing_widgets.dart'
+    show LandingSecondaryButton, SampleDataChip;
 import '../models/billing_data.dart';
 import '../models/household.dart';
 import '../services/api_service.dart';
@@ -9,7 +10,9 @@ import '../theme/app_tokens.dart';
 import '../theme/landing_colors.dart';
 import '../widgets/app_back_link.dart';
 import '../widgets/app_components.dart';
+import '../widgets/app_message.dart';
 import '../widgets/app_top_bar.dart';
+import 'add_household_screen.dart';
 import 'forecast_bill_screen.dart';
 import 'record_consumption_screen.dart';
 import 'usage_history_screen.dart';
@@ -18,10 +21,35 @@ import 'usage_monitoring_screen.dart';
 /// SCR-05: Selected Household Dashboard.
 /// Shows the details of the household it receives. Record Consumption, Usage
 /// History, Usage Monitoring and Forecast & Bill open their own screens.
-class HouseholdDashboardScreen extends StatelessWidget {
+class HouseholdDashboardScreen extends StatefulWidget {
   final Household household;
+  final ValueChanged<Household>? onBillingUpdated;
 
-  const HouseholdDashboardScreen({super.key, required this.household});
+  const HouseholdDashboardScreen({
+    super.key,
+    required this.household,
+    this.onBillingUpdated,
+  });
+
+  @override
+  State<HouseholdDashboardScreen> createState() =>
+      _HouseholdDashboardScreenState();
+}
+
+class _HouseholdDashboardScreenState extends State<HouseholdDashboardScreen> {
+  late Household household = widget.household;
+
+  Future<void> _editBilling() async {
+    final updated = await Navigator.of(context).push<Household>(
+      MaterialPageRoute(
+        builder: (_) => AddHouseholdScreen(editBillingFor: household),
+      ),
+    );
+    if (!mounted || updated == null) return;
+    setState(() => household = updated);
+    widget.onBillingUpdated?.call(updated);
+    showTemporaryMessage(context, 'Billing settings saved.');
+  }
 
   void _openRecordConsumption(BuildContext context) {
     Navigator.of(context).push(
@@ -87,6 +115,13 @@ class HouseholdDashboardScreen extends StatelessWidget {
                           const SizedBox(height: 14),
                           _InfoNote(text: note),
                         ],
+                        if (household.id != null && !household.isSample) ...[
+                          const SizedBox(height: 12),
+                          LandingSecondaryButton(
+                            label: 'Edit Billing Settings',
+                            onPressed: _editBilling,
+                          ),
+                        ],
                         const SizedBox(height: 32),
                         Text(
                           'Household tools',
@@ -139,9 +174,10 @@ String? _noteFor(Household h) {
   if (h.isSample) {
     return 'This is a sample household. Its values are placeholders.';
   }
-  if (h.occupants <= 0 ||
-      h.provider.trim().isEmpty ||
-      h.billingCycleDay == null) {
+  if (h.provider.trim().isEmpty || h.billingCycleDay == null) {
+    return 'Add your provider and billing cycle day to see bill estimates.';
+  }
+  if (h.occupants <= 0) {
     return 'Some household details are not available for this household.';
   }
   return null;

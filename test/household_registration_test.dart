@@ -98,25 +98,84 @@ void main() {
     }, () => client);
   });
 
-  testWidgets(
-    'legacy household shows an unavailable rate and unset billing day',
-    (tester) async {
-      tester.view.devicePixelRatio = 1;
-      tester.view.physicalSize = const Size(1440, 950);
-      addTearDown(tester.view.resetDevicePixelRatio);
-      addTearDown(tester.view.resetPhysicalSize);
-      final household = Household.fromJson({
-        'household_id': 7,
-        'household_name': 'Legacy home',
-        'address': 'Example street',
-        'rate_per_kwh': 1.25,
-      });
+  testWidgets('adds missing billing settings to an existing household', (
+    tester,
+  ) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(1440, 950);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    addTearDown(tester.view.resetPhysicalSize);
+    final household = Household.fromJson({
+      'household_id': 7,
+      'household_name': 'Legacy home',
+      'address': 'Example street',
+      'rate_per_kwh': 1.25,
+    });
+    Household? updated;
+    final client = MockClient((request) async {
+      switch (request.url.path) {
+        case '/api/auth/login':
+          const role = 'HOUSEHOLD_USER';
+          return jsonResponse({'token': testToken(role), 'role': role}, 200);
+        case '/api/households/7/billing':
+          expect(request.method, 'PUT');
+          final payload = jsonDecode(request.body) as Map<String, dynamic>;
+          expect(payload, {
+            'electricity_provider': 'ANECO',
+            'billing_cycle_day': 15,
+          });
+          return jsonResponse({
+            'household_id': 7,
+            'household_name': 'Legacy home',
+            'address': 'Example street',
+            ...payload,
+          }, 200);
+        case '/api/electricity-rates/current':
+          return jsonResponse({
+            'rate_id': 9,
+            'provider': 'ANECO',
+            'rate_per_kwh': 8.125,
+            'effective_date': '2026-11-01',
+          }, 200);
+        default:
+          fail('Unexpected request ${request.url}');
+      }
+    });
+    await http.runWithClient(() async {
+      await ApiService.login(
+        usernameOrEmail: 'example',
+        password: 'test input',
+      );
       await tester.pumpWidget(
-        MaterialApp(home: HouseholdDashboardScreen(household: household)),
+        MaterialApp(
+          home: HouseholdDashboardScreen(
+            household: household,
+            onBillingUpdated: (household) => updated = household,
+          ),
+        ),
       );
       expect(find.text('Rate unavailable'), findsOneWidget);
       expect(find.textContaining('₱1.25', findRichText: true), findsNothing);
       expect(find.text('Not set'), findsWidgets);
-    },
-  );
+      await tester.tap(find.text('Edit Billing Settings'));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byType(TextFormField), '15');
+      await tester.tap(find.byType(DropdownButtonFormField<String>));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('ANECO').last);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Save Billing Settings'));
+      await tester.pumpAndSettle();
+      expect(updated?.id, 7);
+      expect(updated?.billingCycleDay, 15);
+      expect(find.textContaining('₱8.125', findRichText: true), findsOneWidget);
+
+      await tester.tap(find.text('Edit Billing Settings'));
+      await tester.pumpAndSettle();
+      expect(find.text('15'), findsOneWidget);
+      expect(find.text('ANECO'), findsWidgets);
+      ApiService.logout();
+      await tester.pumpWidget(const SizedBox());
+    }, () => client);
+  });
 }

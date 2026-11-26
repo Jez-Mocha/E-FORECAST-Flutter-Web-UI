@@ -225,7 +225,7 @@ class LandingLogo extends StatelessWidget {
 
 class LandingPrimaryButton extends StatelessWidget {
   final String label;
-  final VoidCallback onPressed;
+  final VoidCallback? onPressed;
   final bool large;
 
   const LandingPrimaryButton({
@@ -263,7 +263,7 @@ class LandingPrimaryButton extends StatelessWidget {
 
 class LandingSecondaryButton extends StatelessWidget {
   final String label;
-  final VoidCallback onPressed;
+  final VoidCallback? onPressed;
 
   const LandingSecondaryButton({
     super.key,

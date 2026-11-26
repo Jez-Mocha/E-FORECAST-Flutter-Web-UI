@@ -87,7 +87,14 @@ class _DashboardScreenState extends State<DashboardScreen> {
   void _viewHousehold(Household household) {
     Navigator.of(context).push(
       MaterialPageRoute(
-        builder: (_) => HouseholdDashboardScreen(household: household),
+        builder: (_) => HouseholdDashboardScreen(
+          household: household,
+          onBillingUpdated: (updated) {
+            if (!mounted) return;
+            final index = _households.indexWhere((h) => h.id == updated.id);
+            if (index != -1) setState(() => _households[index] = updated);
+          },
+        ),
       ),
     );
   }
