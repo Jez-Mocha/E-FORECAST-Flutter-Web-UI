@@ -9,7 +9,7 @@ import '../theme/landing_colors.dart';
 class HouseholdCard extends StatelessWidget {
   final String name;
   final String address;
-  final int occupants;
+  final int? numberOfAppliances;
   final String provider;
   final VoidCallback? onView;
 
@@ -17,7 +17,7 @@ class HouseholdCard extends StatelessWidget {
     super.key,
     required this.name,
     required this.address,
-    required this.occupants,
+    required this.numberOfAppliances,
     required this.provider,
     this.onView,
   });
@@ -89,8 +89,12 @@ class HouseholdCard extends StatelessWidget {
             runSpacing: 10,
             children: [
               _InfoPill(
-                icon: Icons.people_outline_rounded,
-                label: occupants == 1 ? '1 occupant' : '$occupants occupants',
+                icon: Icons.devices_other_outlined,
+                label: numberOfAppliances == null
+                    ? 'Appliances not set'
+                    : numberOfAppliances == 1
+                        ? '1 appliance'
+                        : '$numberOfAppliances appliances',
               ),
               _InfoPill(icon: Icons.bolt_rounded, label: provider),
             ],

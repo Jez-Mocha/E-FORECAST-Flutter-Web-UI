@@ -4,6 +4,8 @@ import '../landing/landing_widgets.dart'
     show LandingSecondaryButton, LandingStatTile, ThemeToggleButton;
 import '../models/auth_session.dart';
 import '../models/billing_data.dart';
+import '../models/household.dart';
+import 'add_household_screen.dart';
 import '../services/api_service.dart';
 import '../theme/app_effects.dart';
 import '../theme/app_theme.dart';
@@ -247,31 +249,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
       _section(
         title: 'Household Monitoring',
         icon: Icons.home_work_outlined,
-        child: _records(
-          future: _households,
-          empty: 'No households found.',
-          retry: () => setState(() {
-            _households = _load(ApiService.getAdminHouseholds);
-          }),
-          columns: const [
-            'Household ID',
-            'Household',
-            'Address',
-            'Owner',
-            'Email',
-            'Meter readings',
-            'Total kWh',
-          ],
-          row: (data) => [
-            _text(data['household_id']),
-            _text(data['household_name']),
-            _text(data['address']),
-            _text(data['owner']),
-            _text(data['email']),
-            _text(data['consumption_records']),
-            _number(data['total_kwh']),
-          ],
-        ),
+        child: _householdRecords(),
       ),
       _section(
         title: 'Consumption Records',
@@ -374,6 +352,114 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
         ),
       ),
     ];
+  }
+
+  Widget _householdRecords() {
+    return FutureBuilder<_Collection<_Row>>(
+      future: _households,
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const LinearProgressIndicator(
+            semanticsLabel: 'Loading households',
+          );
+        }
+
+        final result = snapshot.data;
+        if (result?.error case final error?) {
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _status(error, error: true),
+              TextButton(
+                onPressed: () {
+                  setState(() {
+                    _households = _load(ApiService.getAdminHouseholds);
+                  });
+                },
+                child: const Text('Retry'),
+              ),
+            ],
+          );
+        }
+
+        final items = result?.items;
+        if (items == null || items.isEmpty) {
+          return _status('No households found.');
+        }
+
+        return LayoutBuilder(
+          builder: (context, constraints) => Scrollbar(
+            thumbVisibility: true,
+            child: SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              padding: const EdgeInsets.only(bottom: AppSpacing.sm),
+              child: ConstrainedBox(
+                constraints: BoxConstraints(minWidth: constraints.maxWidth),
+                child: DataTable(
+                  headingRowColor: WidgetStatePropertyAll(
+                    LandingColors.backgroundSoft,
+                  ),
+                  columnSpacing: AppSpacing.xl,
+                  columns: const [
+                    DataColumn(label: Text('Household ID')),
+                    DataColumn(label: Text('Household')),
+                    DataColumn(label: Text('Address')),
+                    DataColumn(label: Text('Owner')),
+                    DataColumn(label: Text('Email')),
+                    DataColumn(label: Text('Meter readings')),
+                    DataColumn(label: Text('Total kWh')),
+                    DataColumn(label: Text('Billing Cycle')),
+                    DataColumn(label: Text('Action')),
+                  ],
+                  rows: items.map((data) {
+                    final household = Household.fromJson(data);
+                    final cycleDay = data['billing_cycle_day'];
+
+                    return DataRow(
+                      cells: [
+                        DataCell(Text(_text(data['household_id']))),
+                        DataCell(Text(_text(data['household_name']))),
+                        DataCell(Text(_text(data['address']))),
+                        DataCell(Text(_text(data['owner']))),
+                        DataCell(Text(_text(data['email']))),
+                        DataCell(Text(_text(data['consumption_records']))),
+                        DataCell(Text(_number(data['total_kwh']))),
+                        DataCell(
+                          Text(cycleDay == null ? '?' : 'Day $cycleDay'),
+                        ),
+                        DataCell(
+                          TextButton.icon(
+                            onPressed: household.id == null
+                                ? null
+                                : () => _editBillingCycle(household),
+                            icon: const Icon(Icons.edit_outlined, size: 18),
+                            label: const Text('Edit'),
+                          ),
+                        ),
+                      ],
+                    );
+                  }).toList(),
+                ),
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Future<void> _editBillingCycle(Household household) async {
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => AddHouseholdScreen(editBillingCycleFor: household),
+      ),
+    );
+
+    if (!mounted) return;
+
+    setState(() {
+      _households = _load(ApiService.getAdminHouseholds);
+    });
   }
 
   Widget _section({

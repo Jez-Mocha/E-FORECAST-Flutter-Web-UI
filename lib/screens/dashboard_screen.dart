@@ -546,7 +546,7 @@ class _HouseholdGrid extends StatelessWidget {
                 child: HouseholdCard(
                   name: h.name,
                   address: h.address,
-                  occupants: h.occupants,
+                  numberOfAppliances: h.numberOfAppliances,
                   provider: h.provider,
                   onView: () => onViewHousehold(h),
                 ),

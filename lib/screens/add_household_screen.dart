@@ -23,9 +23,17 @@ import '../widgets/app_top_bar.dart';
 /// return a [Household] to the screen that opened it (via Navigator.pop).
 /// If saving fails, the user stays on the form and nothing is returned.
 class AddHouseholdScreen extends StatefulWidget {
-  const AddHouseholdScreen({super.key, this.editBillingFor});
+  const AddHouseholdScreen({
+    super.key,
+    this.editHouseholdDetailsFor,
+    this.editBillingCycleFor,
+  }) : assert(
+          editHouseholdDetailsFor == null || editBillingCycleFor == null,
+          'Only one edit mode can be used at a time.',
+        );
 
-  final Household? editBillingFor;
+  final Household? editHouseholdDetailsFor;
+  final Household? editBillingCycleFor;
 
   @override
   State<AddHouseholdScreen> createState() => _AddHouseholdScreenState();
@@ -38,27 +46,52 @@ class _AddHouseholdScreenState extends State<AddHouseholdScreen> {
   final _meterCtrl = TextEditingController();
   final _streetCtrl = TextEditingController();
   final _cityCtrl = TextEditingController();
-  final _occupantsCtrl = TextEditingController();
+  final _appliancesCtrl = TextEditingController();
+
   late final _billingDayCtrl = TextEditingController(
-    text: widget.editBillingFor?.billingCycleDay?.toString(),
+    text: widget.editBillingCycleFor?.billingCycleDay?.toString() ?? '',
   );
+
   late String? _providerCode = _existingProvider;
 
-  bool get _isEditing => widget.editBillingFor != null;
+  bool get _isHouseholdDetailsEdit =>
+      widget.editHouseholdDetailsFor != null;
+
+  bool get _isAdminBillingEdit =>
+      widget.editBillingCycleFor != null;
+
+  bool get _isEditing =>
+      _isHouseholdDetailsEdit || _isAdminBillingEdit;
 
   String? get _existingProvider {
-    final provider = widget.editBillingFor?.provider;
+    final provider =
+        widget.editHouseholdDetailsFor?.provider ??
+        widget.editBillingCycleFor?.provider;
+
     return provider == null || provider.isEmpty ? null : provider;
   }
 
   String get _saveLabel => _isSaving
-      ? 'Saving…'
-      : _isEditing
-      ? 'Save Billing Settings'
-      : 'Save Household';
+      ? 'Saving...'
+      : _isHouseholdDetailsEdit
+          ? 'Save Changes'
+          : _isAdminBillingEdit
+              ? 'Save Billing Cycle'
+              : 'Save Household';
 
-  // True while the household is being saved on the server.
   bool _isSaving = false;
+@override
+void initState() {
+  super.initState();
+
+  final household = widget.editHouseholdDetailsFor;
+
+  if (household != null) {
+    _meterCtrl.text = household.meterNumber ?? '';
+    _appliancesCtrl.text =
+        household.numberOfAppliances?.toString() ?? '';
+  }
+}
 
   @override
   void dispose() {
@@ -66,58 +99,69 @@ class _AddHouseholdScreenState extends State<AddHouseholdScreen> {
     _meterCtrl.dispose();
     _streetCtrl.dispose();
     _cityCtrl.dispose();
-    _occupantsCtrl.dispose();
+    _appliancesCtrl.dispose();
     _billingDayCtrl.dispose();
     super.dispose();
   }
 
-  // ── Actions ───────────────────────────────────────────────────────────────
+  // â”€â”€ Actions â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   /// Checks every field, saves the household on the server, and only then
   /// returns the new household (with its server ID) to the dashboard.
-  Future<void> _save() async {
-    // Stops double taps and a second Enter key press while saving.
-    if (_isSaving) return;
-    if (!(_formKey.currentState?.validate() ?? false)) return;
+ Future<void> _save() async {
+  if (_isSaving) return;
+  if (!(_formKey.currentState?.validate() ?? false)) return;
 
-    setState(() => _isSaving = true);
+  setState(() => _isSaving = true);
 
-    try {
-      final billingDay = int.parse(_billingDayCtrl.text.trim());
-      final household = await (_isEditing
-          ? ApiService.updateHouseholdBilling(
-              householdId: widget.editBillingFor!.id!,
-              electricityProvider: _providerCode!,
-              billingCycleDay: billingDay,
-            )
-          : ApiService.createHousehold(
-              householdName: _nameCtrl.text.trim(),
-              address: '${_streetCtrl.text.trim()}, ${_cityCtrl.text.trim()}',
-              meterNumber: _meterCtrl.text.trim(),
-              occupants: int.parse(_occupantsCtrl.text.trim()),
-              electricityProvider: _providerCode!,
-              billingCycleDay: billingDay,
-            ));
-      if (!mounted) return;
-      Navigator.of(context).pop(household);
-    } on ApiException catch (e) {
-      // Friendly message. The user stays on the form to fix it.
-      if (!mounted) return;
-      setState(() => _isSaving = false);
-      showTemporaryMessage(context, e.message);
-    } catch (_) {
-      if (!mounted) return;
-      setState(() => _isSaving = false);
-      showTemporaryMessage(context, 'Something went wrong. Please try again.');
+  try {
+    final Household household;
+
+    if (_isHouseholdDetailsEdit) {
+      household = await ApiService.updateHouseholdDetails(
+        householdId: widget.editHouseholdDetailsFor!.id!,
+        meterNumber: _meterCtrl.text.trim(),
+        numberOfAppliances: int.parse(_appliancesCtrl.text.trim()),
+        electricityProvider: _providerCode!,
+      );
+    } else if (_isAdminBillingEdit) {
+      household = await ApiService.updateAdminBillingCycle(
+        householdId: widget.editBillingCycleFor!.id!,
+        billingCycleDay: int.parse(_billingDayCtrl.text.trim()),
+      );
+    } else {
+      household = await ApiService.createHousehold(
+        householdName: _nameCtrl.text.trim(),
+        address: '${_streetCtrl.text.trim()}, ${_cityCtrl.text.trim()}',
+        meterNumber: _meterCtrl.text.trim(),
+        numberOfAppliances: int.parse(_appliancesCtrl.text.trim()),
+        electricityProvider: _providerCode!,
+        billingCycleDay: int.parse(_billingDayCtrl.text.trim()),
+      );
     }
+
+    if (!mounted) return;
+    Navigator.of(context).pop(household);
+  } on ApiException catch (e) {
+    if (!mounted) return;
+    setState(() => _isSaving = false);
+    showTemporaryMessage(context, e.message);
+  } catch (_) {
+    if (!mounted) return;
+    setState(() => _isSaving = false);
+    showTemporaryMessage(
+      context,
+      'Something went wrong. Please try again.',
+    );
   }
+}
 
   /// Leaves without saving (the dashboard receives nothing).
   void _cancel() {
     if (!_isSaving) Navigator.of(context).pop();
   }
 
-  // ── Build ─────────────────────────────────────────────────────────────────
+  // â”€â”€ Build â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   @override
   Widget build(BuildContext context) {
@@ -186,7 +230,11 @@ class _AddHouseholdScreenState extends State<AddHouseholdScreen> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
-          _isEditing ? 'Edit Billing Settings' : 'Add Household',
+          _isHouseholdDetailsEdit
+              ? 'Edit Household Details'
+              : _isAdminBillingEdit
+                  ? 'Edit Billing Cycle'
+                  : 'Add Household',
           style: TextStyle(
             color: LandingColors.textPrimary,
             fontSize: AppText.pageTitle,
@@ -196,9 +244,11 @@ class _AddHouseholdScreenState extends State<AddHouseholdScreen> {
         ),
         const SizedBox(height: 6),
         Text(
-          _isEditing
-              ? 'Use the provider and billing cycle day from your electricity bill.'
-              : 'Enter the details of the household you want to track.',
+          _isHouseholdDetailsEdit
+              ? 'Update your meter number, number of appliances, and electricity provider.'
+              : _isAdminBillingEdit
+                  ? 'Update the billing cycle day for this household.'
+                  : 'Enter the details of the household you want to track.',
           style: TextStyle(
             color: LandingColors.textSecondary,
             fontSize: 14,
@@ -213,7 +263,7 @@ class _AddHouseholdScreenState extends State<AddHouseholdScreen> {
     return Form(
       key: _formKey,
       // Errors appear after the user has interacted with a field.
-      autovalidateMode: AutovalidateMode.onUserInteraction,
+      autovalidateMode: AutovalidateMode.disabled,
       child: LayoutBuilder(
         builder: (context, constraints) {
           // Pairs of fields sit side by side when there is room.
@@ -223,9 +273,35 @@ class _AddHouseholdScreenState extends State<AddHouseholdScreen> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              if (_isEditing)
-                _fieldRow(twoCol, _providerField(), _billingDayField())
-              else ...[
+              if (_isHouseholdDetailsEdit) ...[
+                _fieldRow(
+                  twoCol,
+                  _field(
+                    controller: _meterCtrl,
+                    label: 'Meter Number',
+                    hint: 'e.g. MTR-000010',
+                    icon: Icons.speed_outlined,
+                    capitalization: TextCapitalization.characters,
+                    validator: _validateMeterNumber,
+                  ),
+                  _field(
+                    controller: _appliancesCtrl,
+                    label: 'Number of Appliances',
+                    icon: Icons.devices_other_outlined,
+                    keyboardType: TextInputType.number,
+                    formatters: [FilteringTextInputFormatter.digitsOnly],
+                    validator: (v) => _validateWholeNumber(
+                      v,
+                      label: 'Number of appliances',
+                      min: 1,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                _providerField(),
+              ] else if (_isAdminBillingEdit) ...[
+                _billingDayField(),
+              ] else ...[
                 _field(
                   controller: _nameCtrl,
                   label: 'Household Name',
@@ -268,16 +344,15 @@ class _AddHouseholdScreenState extends State<AddHouseholdScreen> {
                 _fieldRow(
                   twoCol,
                   _field(
-                    controller: _occupantsCtrl,
-                    label: 'Number of Occupants',
-                    icon: Icons.people_outline_rounded,
+                    controller: _appliancesCtrl,
+                    label: 'Number of Appliances',
+                    icon: Icons.devices_other_outlined,
                     keyboardType: TextInputType.number,
                     formatters: [FilteringTextInputFormatter.digitsOnly],
                     validator: (v) => _validateWholeNumber(
                       v,
-                      label: 'Number of occupants',
+                      label: 'Number of appliances',
                       min: 1,
-                      max: 50,
                     ),
                   ),
                   _providerField(),
@@ -287,7 +362,7 @@ class _AddHouseholdScreenState extends State<AddHouseholdScreen> {
                   twoCol,
                   InputDecorator(
                     decoration: InputDecoration(
-                      labelText: 'Rate per kWh (₱)',
+                      labelText: 'Rate per kWh (â‚±)',
                       helperText: 'Managed by the administrator',
                       helperMaxLines: 2,
                       prefixIcon: Icon(
@@ -366,6 +441,7 @@ class _AddHouseholdScreenState extends State<AddHouseholdScreen> {
           ),
       ],
       onChanged: _isSaving ? null : (value) => _providerCode = value,
+      autovalidateMode: AutovalidateMode.onUserInteraction,
       validator: (value) => _validateRequired(value, 'Electricity provider'),
     );
   }
@@ -374,7 +450,7 @@ class _AddHouseholdScreenState extends State<AddHouseholdScreen> {
     controller: _billingDayCtrl,
     label: 'Billing Cycle Day',
     hint: '1 to 31',
-    helper: 'Day of the month (1–31)',
+    helper: 'Day of the month (1â€“31)',
     icon: Icons.event_outlined,
     keyboardType: TextInputType.number,
     formatters: [FilteringTextInputFormatter.digitsOnly],
@@ -421,6 +497,7 @@ class _AddHouseholdScreenState extends State<AddHouseholdScreen> {
     return TextFormField(
       controller: controller,
       validator: validator,
+      autovalidateMode: AutovalidateMode.onUserInteraction,
       enabled: !_isSaving,
       keyboardType: keyboardType,
       inputFormatters: formatters,
@@ -433,13 +510,14 @@ class _AddHouseholdScreenState extends State<AddHouseholdScreen> {
         hintText: hint,
         helperText: helper,
         helperMaxLines: 2,
+        errorMaxLines: 3,
         prefixIcon: Icon(icon, size: 18, color: LandingColors.textSecondary),
       ),
     );
   }
 }
 
-// ── Validation ──────────────────────────────────────────────────────────────
+// â”€â”€ Validation â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 String? _validateRequired(String? value, String label) {
   if (value == null || value.trim().isEmpty) return '$label is required';
@@ -450,42 +528,62 @@ String? _validateRequired(String? value, String label) {
 String? _validateName(String? value) {
   final required = _validateRequired(value, 'Household name');
   if (required != null) return required;
-  final length = value!.trim().length;
-  if (length < 2) return 'Use at least 2 characters';
-  if (length > 60) return 'Use 60 characters or fewer';
+
+  final text = value!.trim();
+  if (text.length < 2) return 'Use at least 2 characters';
+  if (text.length > 60) return 'Use 60 characters or fewer';
+  if (!RegExp(r'^[\p{L} ]+$', unicode: true).hasMatch(text)) {
+    return 'Letters and spaces only';
+  }
   return null;
 }
 
-/// The server accepts 1 to 30 characters, and each meter number can only
-/// belong to one household.
 String? _validateMeterNumber(String? value) {
   final required = _validateRequired(value, 'Meter number');
   if (required != null) return required;
-  if (value!.trim().length > 30) return 'Use 30 characters or fewer';
+
+  final text = value!.trim();
+  if (text.length > 30) return 'Use 30 characters or fewer';
+  if (!RegExp(r'^[a-zA-Z0-9-]+$').hasMatch(text)) {
+    return 'Letters, numbers, and hyphens only';
+  }
   return null;
 }
 
-/// Street and city are joined into one address (the server allows 255).
 String? _validateAddressPart(String? value, String label) {
   final required = _validateRequired(value, label);
   if (required != null) return required;
-  if (value!.trim().length > 120) return 'Use 120 characters or fewer';
+
+  final text = value!.trim();
+  if (text.length > 120) return 'Use 120 characters or fewer';
+  if (!RegExp(r'^[\p{L}0-9 ,./-]+$', unicode: true).hasMatch(text)) {
+    return 'Use letters, numbers, spaces, comma, period, hyphen, or slash only';
+  }
   return null;
 }
 
-/// A whole number between [min] and [max] (both included).
+/// Validates a whole number with a minimum and optional maximum.
 String? _validateWholeNumber(
   String? value, {
   required String label,
   required int min,
-  required int max,
+  int? max,
 }) {
   final text = value?.trim() ?? '';
   if (text.isEmpty) return '$label is required';
+
+  if (!RegExp(r'^\d+$').hasMatch(text)) {
+    return 'Numbers only';
+  }
+
   final number = int.tryParse(text);
   if (number == null) return 'Enter a whole number';
-  if (number < 1 || number < min || number > max) {
-    return 'Enter a number from $min to $max';
+
+  if (number < min || (max != null && number > max)) {
+    return max == null
+        ? 'Enter a number of at least $min'
+        : 'Enter a number from $min to $max';
   }
+
   return null;
 }
