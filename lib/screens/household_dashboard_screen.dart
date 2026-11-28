@@ -17,6 +17,7 @@ import 'forecast_bill_screen.dart';
 import 'record_consumption_screen.dart';
 import 'usage_history_screen.dart';
 import 'usage_monitoring_screen.dart';
+import 'historical_consumption_screen.dart';
 
 /// SCR-05: Selected Household Dashboard.
 /// Shows the details of the household it receives. Record Consumption, Usage
@@ -42,7 +43,7 @@ class _HouseholdDashboardScreenState extends State<HouseholdDashboardScreen> {
   Future<void> _editBilling() async {
     final updated = await Navigator.of(context).push<Household>(
       MaterialPageRoute(
-        builder: (_) => AddHouseholdScreen(editBillingFor: household),
+        builder: (_) => AddHouseholdScreen(editHouseholdDetailsFor: household),
       ),
     );
     if (!mounted || updated == null) return;
@@ -55,6 +56,14 @@ class _HouseholdDashboardScreenState extends State<HouseholdDashboardScreen> {
     Navigator.of(context).push(
       MaterialPageRoute(
         builder: (_) => RecordConsumptionScreen(household: household),
+      ),
+    );
+  }
+
+  void _openHistoricalConsumption(BuildContext context) {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => HistoricalConsumptionScreen(household: household),
       ),
     );
   }
@@ -118,7 +127,7 @@ class _HouseholdDashboardScreenState extends State<HouseholdDashboardScreen> {
                         if (household.id != null && !household.isSample) ...[
                           const SizedBox(height: 12),
                           LandingSecondaryButton(
-                            label: 'Edit Billing Settings',
+                            label: 'Edit Household Details',
                             onPressed: _editBilling,
                           ),
                         ],
@@ -143,6 +152,8 @@ class _HouseholdDashboardScreenState extends State<HouseholdDashboardScreen> {
                         const SizedBox(height: 16),
                         _ToolGrid(
                           onRecord: () => _openRecordConsumption(context),
+                          onHistorical: () =>
+                              _openHistoricalConsumption(context),
                           onHistory: () => _openUsageHistory(context),
                           onMonitoring: () => _openUsageMonitoring(context),
                           onForecast: () => _openForecastBill(context),
@@ -160,13 +171,13 @@ class _HouseholdDashboardScreenState extends State<HouseholdDashboardScreen> {
   }
 }
 
-// ── Display helpers ─────────────────────────────────────────────────────────
+// â”€â”€ Display helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 /// Formats a rate without unnecessary trailing zeros.
 /// Examples: 12.5000 -> 12.5, 12.0000 -> 12, 12.3456 -> 12.3456.
 String _formatRate(double rate) {
   final text = rate.toStringAsFixed(4).replaceFirst(RegExp(r'\.?0+$'), '');
-  return '₱$text';
+  return 'â‚±$text';
 }
 
 /// The short note under the header, or null when there is nothing to say.
@@ -177,13 +188,13 @@ String? _noteFor(Household h) {
   if (h.provider.trim().isEmpty || h.billingCycleDay == null) {
     return 'Add your provider and billing cycle day to see bill estimates.';
   }
-  if (h.occupants <= 0) {
+  if ((h.numberOfAppliances ?? 0) <= 0) {
     return 'Some household details are not available for this household.';
   }
   return null;
 }
 
-// ── Header: identity + household details in one card ────────────────────────
+// â”€â”€ Header: identity + household details in one card â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 class _HouseholdHeader extends StatelessWidget {
   final Household household;
@@ -193,7 +204,7 @@ class _HouseholdHeader extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final meter = household.meterNumber?.trim();
-    final occupants = household.occupants;
+    final numberOfAppliances = household.numberOfAppliances;
     final billingDay = household.billingCycleDay;
 
     return GlassCard(
@@ -280,10 +291,12 @@ class _HouseholdHeader extends StatelessWidget {
             children: [
               Expanded(
                 child: _DetailTile(
-                  icon: Icons.people_outline_rounded,
-                  label: 'Occupants',
-                  value: occupants <= 0 ? null : '$occupants',
-                  unit: occupants == 1 ? 'occupant' : 'occupants',
+                  icon: Icons.devices_other_outlined,
+                  label: 'Number of Appliances',
+                  value: numberOfAppliances == null || numberOfAppliances <= 0
+                      ? null
+                      : '$numberOfAppliances',
+                  unit: numberOfAppliances == 1 ? 'appliance' : 'appliances',
                 ),
               ),
               const SizedBox(width: 14),
@@ -390,7 +403,7 @@ class _HouseholdRateTileState extends State<_HouseholdRateTile> {
           value: rate == null ? null : _formatRate(rate.ratePerKwh),
           unit: 'per kWh',
           missingLabel: switch (snapshot.connectionState) {
-            ConnectionState.waiting => 'Loading…',
+            ConnectionState.waiting => 'Loadingâ€¦',
             _
                 when error is ApiException &&
                     error.code != 'RATE_NOT_FOUND' &&
@@ -532,18 +545,20 @@ class _InfoNote extends StatelessWidget {
   }
 }
 
-// ── Household tools ─────────────────────────────────────────────────────────
+// â”€â”€ Household tools â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 /// Record Consumption as a full-width primary card, then the three other
 /// tools in an equal row below it.
 class _ToolGrid extends StatelessWidget {
   final VoidCallback onRecord;
+  final VoidCallback onHistorical;
   final VoidCallback onHistory;
   final VoidCallback onMonitoring;
   final VoidCallback onForecast;
 
   const _ToolGrid({
     required this.onRecord,
+    required this.onHistorical,
     required this.onHistory,
     required this.onMonitoring,
     required this.onForecast,
@@ -564,6 +579,14 @@ class _ToolGrid extends StatelessWidget {
               'usage, forecast and bill up to date.',
           actionLabel: 'Record readings',
           onTap: onRecord,
+        ),
+        const SizedBox(height: gap),
+        _PrimaryToolCard(
+          icon: Icons.calendar_month_rounded,
+          title: 'Historical Consumption',
+          description: 'Upload an electricity bill or enter at least six previous months of kWh values together.',
+          actionLabel: 'Add historical usage',
+          onTap: onHistorical,
         ),
         const SizedBox(height: gap),
         IntrinsicHeight(

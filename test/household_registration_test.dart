@@ -33,7 +33,7 @@ void main() {
             'household_name': 'Test home',
             'meter_number': 'TEST-METER',
             'address': 'Example street, Example city',
-            'occupants': 4,
+            'number_of_appliances': 4,
             'electricity_provider': 'ANECO',
             'billing_cycle_day': 31,
           });

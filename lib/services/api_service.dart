@@ -110,7 +110,7 @@ class ApiService {
     required String householdName,
     required String address,
     required String meterNumber,
-    required int occupants,
+    required int numberOfAppliances,
     required String electricityProvider,
     required int billingCycleDay,
   }) async {
@@ -120,7 +120,7 @@ class ApiService {
         'household_name': householdName,
         'address': address,
         'meter_number': meterNumber,
-        'occupants': occupants,
+        'number_of_appliances': numberOfAppliances,
         'electricity_provider': electricityProvider,
         'billing_cycle_day': billingCycleDay,
       },
@@ -134,23 +134,45 @@ class ApiService {
     return household;
   }
 
-  static Future<Household> updateHouseholdBilling({
-    required int householdId,
-    required String electricityProvider,
-    required int billingCycleDay,
-  }) async {
-    final result = await _request(
-      '/api/households/$householdId/billing',
-      method: 'PUT',
-      body: {
-        'electricity_provider': electricityProvider,
-        'billing_cycle_day': billingCycleDay,
-      },
-    );
-    final household = _parse(() => Household.fromJson(result));
-    if (household.id != householdId) throw _unexpected;
-    return household;
-  }
+  // Household users can update their own household details.
+static Future<Household> updateHouseholdDetails({
+  required int householdId,
+  required String meterNumber,
+  required int numberOfAppliances,
+  required String electricityProvider,
+}) async {
+  final result = await _request(
+    '/api/households/$householdId/details',
+    method: 'PUT',
+    body: {
+      'meter_number': meterNumber.trim(),
+      'number_of_appliances': numberOfAppliances,
+      'electricity_provider': electricityProvider,
+    },
+  );
+
+  final household = _parse(() => Household.fromJson(result));
+  if (household.id != householdId) throw _unexpected;
+  return household;
+}
+
+// Admin can update the billing cycle day of any household.
+static Future<Household> updateAdminBillingCycle({
+  required int householdId,
+  required int billingCycleDay,
+}) async {
+  final result = await _request(
+    '/api/admin/households/$householdId/billing-cycle',
+    method: 'PUT',
+    body: {
+      'billing_cycle_day': billingCycleDay,
+    },
+  );
+
+  final household = _parse(() => Household.fromJson(result));
+  if (household.id != householdId) throw _unexpected;
+  return household;
+}
 
   static Future<MeterReading?> getLatestMeterReading(int householdId) async {
     final result = await _request(
@@ -234,6 +256,105 @@ class ApiService {
       },
     );
     return _parse(() => MonthlyConsumption.fromJson(result));
+  }
+
+  // Submit multiple months of historical consumption in one request
+  static Future<Map<String, dynamic>> recordMonthlyConsumptionBatch({
+    required int householdId,
+    required List<Map<String, dynamic>> records,
+  }) => _request(
+    '/api/monthly-consumption/batch',
+    body: {
+      'household_id': householdId,
+      'records': records.map((record) {
+        final month = record['billing_month'] as DateTime;
+        return {
+          'billing_month': _formatDate(DateTime(month.year, month.month)),
+          'consumption_kwh': record['consumption_kwh'],
+        };
+      }).toList(),
+    },
+  );
+
+  // Upload an electricity bill image for OCR scanning.
+  static Future<Map<String, dynamic>> scanElectricityBill({
+    required List<int> imageBytes,
+    required String filename,
+    required DateTime latestMonth,
+  }) async {
+    final active = _session;
+
+    if (active == null) throw _sessionExpired;
+
+    if (!active.expiresAt.isAfter(DateTime.now())) {
+      _expire(active);
+      throw _sessionExpired;
+    }
+
+    final request = http.MultipartRequest(
+      'POST',
+      Uri.parse('$baseUrl/api/monthly-consumption/scan-bill'),
+    );
+
+    request.headers['Authorization'] = 'Bearer ${active.token}';
+
+    request.fields['latest_month'] =
+        '${latestMonth.year.toString().padLeft(4, '0')}-'
+        '${latestMonth.month.toString().padLeft(2, '0')}-01';
+
+    request.files.add(
+      http.MultipartFile.fromBytes('file', imageBytes, filename: filename),
+    );
+
+    final http.Response response;
+
+    try {
+      final streamed = await request.send().timeout(
+        const Duration(seconds: 45),
+      );
+      response = await http.Response.fromStream(streamed)
+          .timeout(const Duration(seconds: 15));
+    } on TimeoutException {
+      throw const ApiException(
+        'The bill image took too long to process. Please try again.',
+      );
+    } on http.ClientException {
+      throw const ApiException(
+        'Could not reach the server. Check that the backend is running.',
+      );
+    }
+
+    final decoded = _decode(response.body);
+
+    if (response.statusCode >= 200 && response.statusCode < 300) {
+      if (decoded is Map<String, dynamic>) return decoded;
+      throw _unexpected;
+    }
+
+    final error = decoded is Map ? decoded['error'] : null;
+    final code = error is Map && error['code'] is String
+        ? error['code'] as String
+        : null;
+    final message = error is Map && error['message'] is String
+        ? error['message'] as String
+        : null;
+
+    if (response.statusCode == 401) {
+      _expire(active);
+      throw ApiException(
+        _sessionExpired.message,
+        statusCode: 401,
+        code: code ?? _sessionExpired.code,
+      );
+    }
+
+    throw ApiException(
+      response.statusCode >= 500
+          ? 'The server had a problem. Please try again later.'
+          : message ?? 'The bill image upload failed.',
+      statusCode: response.statusCode,
+      code: code,
+    );
   }
 
   static Future<List<MonthlyConsumption>> getMonthlyConsumptionHistory(

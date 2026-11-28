@@ -25,7 +25,7 @@ Future<void> openForecast(WidgetTester tester, {int? billingDay}) async {
           name: 'Test home',
           street: 'Test street',
           city: 'Test city',
-          occupants: 2,
+          numberOfAppliances: 2,
           provider: 'ANECO',
           ratePerKwh: null,
           billingCycleDay: billingDay,
